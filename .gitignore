@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# env
+.env
+.env.local
+*.local
+
+# build output
+dist/
+frontend/.next/
+frontend/out/
+
+# logs
+*.log
+npm-debug.log*
+
+# os / editor
+.DS_Store
+
+# claude local (personal) settings
+.claude/settings.local.json
