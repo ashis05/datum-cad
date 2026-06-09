@@ -10,6 +10,7 @@
 
 import opencascade from "replicad-opencascadejs/src/replicad_single.js";
 import type { OpenCascadeInstance } from "replicad-opencascadejs/src/replicad_single.js";
+import * as replicad from "replicad";
 import { setOC, drawRectangle, drawCircle } from "replicad";
 import type { Shape3D } from "replicad";
 import { syncGeometries } from "replicad-threejs-helper";
@@ -55,6 +56,31 @@ export function buildBoxWithHole(): Shape3D {
     .extrude(thickness) as Shape3D;
 
   return plate.cut(hole);
+}
+
+/**
+ * Evaluate LLM-generated `buildModel` code and run it with the given parameter
+ * values, returning the resulting solid.
+ *
+ * SECURITY (prototype only): `new Function` executes model-authored code with
+ * no sandbox. Acceptable for this LOCAL single-user prototype; before shipping,
+ * run it inside the Web Worker (Phase H) with time/resource limits. See README.
+ */
+export function runGeneratedModel(
+  code: string,
+  values: Record<string, number>,
+): Shape3D {
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const factory = new Function(
+    "replicad",
+    "params",
+    `${code}\nreturn buildModel(replicad, params);`,
+  );
+  const shape = factory(replicad, values) as Shape3D;
+  if (!shape) {
+    throw new Error("buildModel did not return a shape.");
+  }
+  return shape;
 }
 
 /**

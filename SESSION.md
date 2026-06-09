@@ -4,9 +4,8 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase C — Gemini proxy wired)
-**Branch:** `master` · **Status:** Phase C code complete; needs real GEMINI_API_KEY in
-`backend/.env.local` for the live acceptance curl → then Phase D
+**Last updated:** 2026-06-09 (after Phase D — end-to-end loop works)
+**Branch:** `master` · **Status:** Phase D complete, awaiting user verification → then Phase E
 
 ---
 
@@ -46,15 +45,16 @@
       `setOC`, build a HARDCODED box-with-hole, mesh faces+edges, render in R3F w/ OrbitControls,
       grid, light. ⚠️ HIGHEST RISK (WASM-in-Next) — SOLVED, see gotchas.
       ✅ Verify: `npm run dev` → :3000 shows a blue 40×20×10mm plate w/ centered hole, orbits.
-- [~] **C — Backend ↔ Gemini (NO frontend wiring).** `POST /api/generate` → Gemini 2.5 Flash-Lite via
+- [x] **C — Backend ↔ Gemini (NO frontend wiring).** `POST /api/generate` → Gemini 2.5 Flash-Lite via
       `@google/genai`, §5.1 system prompt w/ verified Replicad cheatsheet + examples, JSON output
-      mode, temp ≈0.1. CODE DONE + boot/error paths verified. Pending: live curl needs the key.
-      ✅ Verify (after adding key + restarting backend):
-         curl -s -X POST :4000/api/generate -H 'Content-Type: application/json' \
-           -d '{"prompt":"a 40x20x10 plate with a centered 5mm hole"}'
-         → well-formed {code,params,notes} with a buildModel fn.
-- [ ] **D — End-to-end loop.** prompt → /api/generate → `new Function` eval buildModel → mesh → render.
-      ✅ "40×20×10 plate with centered 5mm hole" renders correct solid.
+      mode, temp ≈0.1. LIVE-VERIFIED 2026-06-09: plate prompt + novel hexagon prompt both returned
+      well-formed {code,params,notes} with a valid buildModel. Model id gemini-2.5-flash-lite works.
+      ✅ curl :4000/api/generate -d '{"prompt":"..."}' → {code,params,notes}.
+- [x] **D — End-to-end loop.** prompt → /api/generate → `new Function` eval buildModel → mesh → render.
+      Two-pane UI: left prompt+history(notes/errors), main viewport. Values init from param defaults.
+      LIVE-VERIFIED 2026-06-09 (headless browser): plate prompt → /api/generate 200 → solid renders,
+      notes shown, 0 console/page errors.
+      ✅ Type "a 40×20×10mm plate with a centered 5mm hole" → correct solid renders.
 - [ ] **E — Export.** "Download STEP" + "Download STL" from current BREP solid (`blobSTEP`/`blobSTL`).
       ✅ Both files download and open correctly.
 - [ ] **F — Self-correction.** On kernel throw, auto-retry /api/generate with `previousError` 1–2×.
@@ -78,8 +78,9 @@
 │   ├── app/{layout,page}.tsx   page renders <CadApp/> (header + 3D viewport)
 │   ├── app/globals.css         imports tailwindcss, tw-animate-css, shadcn/tailwind.css
 │   ├── components/ui/button.tsx, lib/utils.ts   (shadcn)
-│   ├── components/cad/         Phase B: CadApp (dynamic ssr:false) → CadStage (kernel init/build/mesh) → Viewport (R3F)
-│   ├── lib/replicad/kernel.ts  initKernel (load OCCT wasm + setOC), buildBoxWithHole, meshShapeToGeometries
+│   ├── components/cad/         CadApp (dynamic ssr:false) → CadStage (orchestrator: prompt/history + viewport) → Viewport (R3F)
+│   ├── lib/api.ts              generateCad() → POST backend /api/generate (NEXT_PUBLIC_BACKEND_URL)
+│   ├── lib/replicad/kernel.ts  initKernel, runGeneratedModel (new Function eval), meshShapeToGeometries, buildBoxWithHole (unused ref)
 │   ├── lib/empty-module.js     stub aliased for browser fs/path (see gotchas)
 │   ├── next.config.ts          turbopack.resolveAlias browser-scoped fs/path → empty stub
 │   ├── public/replicad_single.wasm   OCCT wasm (committed; served at /replicad_single.wasm)
@@ -172,6 +173,17 @@ three **0.184.0**, @react-three/fiber **9.6.1** (peer wants react >=19 <19.3 →
 - System prompt cheatsheet/examples were verified against replicad 0.23 `.d.ts` signatures; the
   plate-with-hole example is the exact shape proven in Phase B. `meshEdges keepMesh` note carried
   from Phase B still applies on the frontend side.
+
+### Phase D gotchas / decisions
+- **Code eval:** `new Function("replicad","params", code + "\\nreturn buildModel(replicad, params);")`,
+  called with the full `import * as replicad from "replicad"` namespace (generated code destructures
+  from it) + values map. Lives in `kernel.runGeneratedModel`. Prototype-only; sandbox in Phase H.
+- **Param values** init from each param's `default` (Object.fromEntries). `params`/`values` are held
+  in CadStage state (getters unused until Phase E/G — wrote `const [, setX]` to avoid lint).
+- **Edits chain:** CadStage passes `currentCode` to the backend on every prompt after the first.
+- **State carried for later phases:** `code` (export/retry), `params`+`values` (sliders).
+- **Dev port conflict:** a `next dev` already on :3000 makes a 2nd `npm run dev` exit ("Another next
+  dev server is already running") — it falls back to :3001 then aborts. Just use the running :3000.
 
 ## Open dependency
 - **GEMINI_API_KEY** — paste into `backend/.env.local`, restart backend, run the Phase C curl.
