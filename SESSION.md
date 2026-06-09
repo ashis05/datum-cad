@@ -4,8 +4,9 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase B — Replicad renders)
-**Branch:** `master` · **Status:** Phase B complete, awaiting user verification → then Phase C
+**Last updated:** 2026-06-09 (after Phase C — Gemini proxy wired)
+**Branch:** `master` · **Status:** Phase C code complete; needs real GEMINI_API_KEY in
+`backend/.env.local` for the live acceptance curl → then Phase D
 
 ---
 
@@ -45,10 +46,13 @@
       `setOC`, build a HARDCODED box-with-hole, mesh faces+edges, render in R3F w/ OrbitControls,
       grid, light. ⚠️ HIGHEST RISK (WASM-in-Next) — SOLVED, see gotchas.
       ✅ Verify: `npm run dev` → :3000 shows a blue 40×20×10mm plate w/ centered hole, orbits.
-- [ ] **C — Backend ↔ Gemini (NO frontend wiring).** `POST /api/generate` → Gemini 2.5 Flash-Lite via
+- [~] **C — Backend ↔ Gemini (NO frontend wiring).** `POST /api/generate` → Gemini 2.5 Flash-Lite via
       `@google/genai`, §5.1 system prompt w/ verified Replicad cheatsheet + examples, JSON output
-      mode, temp ≈0.1. Needs real GEMINI_API_KEY.
-      ✅ `curl` w/ a prompt returns well-formed `{code,params,notes}` containing a `buildModel` fn.
+      mode, temp ≈0.1. CODE DONE + boot/error paths verified. Pending: live curl needs the key.
+      ✅ Verify (after adding key + restarting backend):
+         curl -s -X POST :4000/api/generate -H 'Content-Type: application/json' \
+           -d '{"prompt":"a 40x20x10 plate with a centered 5mm hole"}'
+         → well-formed {code,params,notes} with a buildModel fn.
 - [ ] **D — End-to-end loop.** prompt → /api/generate → `new Function` eval buildModel → mesh → render.
       ✅ "40×20×10 plate with centered 5mm hole" renders correct solid.
 - [ ] **E — Export.** "Download STEP" + "Download STL" from current BREP solid (`blobSTEP`/`blobSTL`).
@@ -81,8 +85,11 @@
 │   ├── public/replicad_single.wasm   OCCT wasm (committed; served at /replicad_single.wasm)
 │   └── .env.local      NEXT_PUBLIC_BACKEND_URL=http://localhost:4000 (gitignored)
 └── backend/            Express + TS proxy
-    ├── src/index.ts    /health route; /api/generate added in Phase C
-    └── .env            GEMINI_API_KEY/PORT/CORS_ORIGIN (gitignored; see .env.example)
+    ├── src/index.ts        /health (now reports model+hasKey) + POST /api/generate
+    ├── src/gemini.ts       @google/genai client, RESPONSE_SCHEMA, generateCad()
+    ├── src/systemPrompt.ts SYSTEM_PROMPT — verified replicad 0.23 cheatsheet + 4 examples
+    ├── .env.local      GEMINI_API_KEY/PORT/CORS_ORIGIN (gitignored; loaded first by dotenv) ← PUT KEY HERE
+    └── .env.example    template (copy to .env.local)
 ```
 
 **Ports:** frontend :3000, backend :4000. CORS allows :3000.
@@ -148,5 +155,24 @@ three **0.184.0**, @react-three/fiber **9.6.1** (peer wants react >=19 <19.3 →
   to ~150px.
 - **The `.wasm` (~10.8MB) is committed to `frontend/public/`** so the build resumes on any device.
 
+### Phase C gotchas / decisions
+- **@google/genai is 2.8.0.** Correct config API = `responseMimeType: "application/json"` +
+  `responseSchema` (a `Schema` built with the `Type` enum: `Type.OBJECT/STRING/ARRAY/NUMBER`).
+  `systemInstruction` + `temperature` go in `config`. `new GoogleGenAI({ apiKey })`,
+  `ai.models.generateContent({ model, contents, config })`, read `response.text`. (Online docs
+  now show Gemini 3.x + a `responseFormat` shape — that's a NEWER SDK; do NOT use it for 2.8.0.)
+- **Model id** defaults to `gemini-2.5-flash-lite` (brief-locked), overridable via `GEMINI_MODEL`
+  env. If the live curl 404s on the model, the id was retired — set GEMINI_MODEL to a current one.
+- **Key file is `backend/.env.local`** (user's choice) — dotenv loads `[".env.local", ".env"]`,
+  first-wins. Added `.env.local`/`.env*.local` to backend/.gitignore (verified ignored).
+- **`.env*` files are permission-protected** in this environment: can WRITE (created .env.local)
+  but cannot READ them, and cannot overwrite `.env.example` (Write needs a prior Read). Don't fight it.
+- **tsx watch does NOT reload on .env.local changes** (only imported source). After pasting the key,
+  RESTART the backend (`npm run dev`) for it to load.
+- System prompt cheatsheet/examples were verified against replicad 0.23 `.d.ts` signatures; the
+  plate-with-hole example is the exact shape proven in Phase B. `meshEdges keepMesh` note carried
+  from Phase B still applies on the frontend side.
+
 ## Open dependency
-- **GEMINI_API_KEY** required for Phase C acceptance (server-side only). Not needed for A/B.
+- **GEMINI_API_KEY** — paste into `backend/.env.local`, restart backend, run the Phase C curl.
+  Server-side only; never exposed to the browser. Not needed for A/B.
