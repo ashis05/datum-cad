@@ -236,6 +236,12 @@ in `backend/src/systemPrompt.ts`. (These are exactly the class of errors Phase F
 4. **Pipeline stages**: 2D Drawing → `.sketchOnPlane()` → Sketch → `.extrude()` → 3D Shape. A Sketch
    has ONLY `.extrude` (no `.translate`). Move the Drawing (2D) or the Shape (3D), never the Sketch.
    Symptom: "...sketchOnPlane(...).translate is not a function".
+5. **CIRCULAR edges need containsPoint, not inDirection.** `inDirection("X/Y/Z")` matches only STRAIGHT
+   edges parallel to an axis; a circle has no axis direction, so on cylinder/flange RIMS, round
+   neck-to-base JOINS, or BORE edges it matches nothing → "Could not fillet, no edge was selected".
+   Select a circle of radius R centered on Z at height H with `e.containsPoint([R, 0, H])` (optionally
+   `.ofCurveType("CIRCLE")`). Cheatsheet now lists ofCurveType + containsPoint + a flange example.
+   CurveType = "LINE"|"CIRCLE"|"ELLIPSE"|... ; finders: containsPoint([x,y,z]), ofCurveType(type).
 - **Frontier note:** Flash-Lite handles 1–3 feature parts reliably. Very dense / physically
   over-constrained prompts (e.g. 80×50×30 enclosure: 6 features, 10mm fillet on 2mm walls, circular
   lip on a rect opening) are nondeterministic — each generation may slip on a different API. After the

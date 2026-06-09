@@ -80,7 +80,17 @@ Edge finders (the finderFn argument to fillet/chamfer; called as e => e.someMeth
 - e.inPlane(planeName, offset?)           // edges lying in a plane, e.g. "XY" (top/bottom face outlines)
 - e.atDistance(distance, point?)          // edges at a distance from a point
 - e.inBox([x1,y1,z1], [x2,y2,z2])         // edges inside a box region
+- e.ofCurveType("CIRCLE")                  // select CIRCULAR edges (rims, bores, round joins); "LINE" for straight
+- e.containsPoint([x,y,z])                 // edges passing through a point — precise way to pick ONE circle/edge
 - CHAIN finder methods to AND them: e => e.inDirection("Z").inBox([..],[..])
+STRAIGHT vs CIRCULAR edges (gets this wrong a lot):
+- inDirection("X"/"Y"/"Z") matches only STRAIGHT edges parallel to that axis (box/prism corners). A
+  CIRCLE has no axis direction, so inDirection NEVER matches a circular edge → "Could not fillet, no
+  edge was selected".
+- For circular edges (a cylinder/flange RIM, a round neck-to-base JOIN, a BORE's edge) use
+  containsPoint with a point the circle passes through. A circle of radius R centered on Z at height H
+  passes through [R, 0, H], so: e => e.containsPoint([R, 0, H]). Combine with ofCurveType("CIRCLE") to
+  be safe. Always pass the ACTUAL radius/height (from params), not a guess.
 - Combinators take FUNCTIONS, not finder objects:
     e => e.either([f => f.inPlane("XY", 0), f => f.inPlane("XY", h)])   // OR of conditions
     e => e.not(f => f.inDirection("Z"))                                  // negate
@@ -145,4 +155,19 @@ Assistant:
     { "name": "wall", "label": "Wall thickness (mm)", "default": 2, "min": 0.8, "max": 20, "step": 0.2 }
   ],
   "notes": "A walled rectangular enclosure with a floor and an open top." }
+
+User: "a round flange 100mm dia x 10mm thick with a 50mm dia neck 30mm tall, a 30mm bore through, the neck-to-flange join filleted 5mm, and both outer rims rounded 2mm"
+Assistant:
+{ "code": "function buildModel(replicad, params){ const { drawCircle } = replicad; const R = params.flangeRadius, t = params.flangeThickness, nR = params.neckRadius, nH = params.neckHeight, bR = params.boreRadius; let part = drawCircle(R).sketchOnPlane().extrude(t); const neck = drawCircle(nR).sketchOnPlane('XY', t).extrude(nH); part = part.fuse(neck); const bore = drawCircle(bR).sketchOnPlane().extrude(t + nH); part = part.cut(bore); part = part.fillet(params.joinFillet, e => e.containsPoint([nR, 0, t])); part = part.fillet(params.rimRound, e => e.either([f => f.containsPoint([R, 0, t]), f => f.containsPoint([R, 0, 0])])); return part; }",
+  "params": [
+    { "name": "flangeRadius", "label": "Flange radius (mm)", "default": 50, "min": 20, "max": 200, "step": 1 },
+    { "name": "flangeThickness", "label": "Flange thickness (mm)", "default": 10, "min": 2, "max": 50, "step": 1 },
+    { "name": "neckRadius", "label": "Neck radius (mm)", "default": 25, "min": 5, "max": 150, "step": 1 },
+    { "name": "neckHeight", "label": "Neck height (mm)", "default": 30, "min": 2, "max": 200, "step": 1 },
+    { "name": "boreRadius", "label": "Bore radius (mm)", "default": 15, "min": 1, "max": 140, "step": 1 },
+    { "name": "joinFillet", "label": "Neck join fillet (mm)", "default": 5, "min": 0, "max": 20, "step": 0.5 },
+    { "name": "rimRound", "label": "Rim round (mm)", "default": 2, "min": 0, "max": 10, "step": 0.5 }
+  ],
+  "notes": "A round flange with a bored neck, a filleted join, and rounded rims." }
+(Note: the rims and the neck-to-flange join are CIRCLES — selected with containsPoint, never inDirection.)
 `;
