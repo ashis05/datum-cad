@@ -4,9 +4,9 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase G — parametric sliders)
-**Branch:** `master` · **Status:** Phases A–E + G complete. Remaining: F (self-correction),
-H (web worker). Awaiting user verification of G.
+**Last updated:** 2026-06-09 (after Phase F — self-correction)
+**Branch:** `master` · **Status:** Phases A–G complete (all core). Remaining: H (web worker, stretch).
+Awaiting user verification of F.
 
 ---
 
@@ -62,10 +62,13 @@ H (web worker). Awaiting user verification of G.
       MANIFOLD_SOLID_BREP/CLOSED_SHELL + END-ISO-10303-21 terminator (19.8KB); STL = valid binary,
       648 triangles, byte count == 84 + tris*50 (32.5KB). 0 errors.
       ✅ Both buttons download files that open correctly.
-- [ ] **F — Self-correction.** On kernel throw, auto-retry /api/generate with `previousError` 1–2×.
-      NOTE: groundwork done — `decodeKernelError()` already yields good messages; backend already
-      accepts `previousError`. F = wire the retry loop in CadStage.handleSubmit (catch build error →
-      re-call generateCad with previousError → rebuild; cap retries). DEFERRED by user; do after G.
+- [x] **F — Self-correction.** Retry loop in `lib/selfCorrect.ts` (generateAndBuildWithRetry, pure +
+      injectable). On a kernel/build throw it re-calls /api/generate with `previousError` (decoded) +
+      the broken `currentCode`, up to maxAttempts=3 (1 + 2 retries). API/quota errors propagate
+      immediately (no wasted retries). UI: live "asking the model to fix it…" status + amber
+      "self-corrected" badge when attempts>1. VERIFIED: 17/17 unit assertions (/tmp/test-selfcorrect.mts)
+      + Playwright integration with mocked /api/generate (broken→good): 2 calls, previousError+currentCode
+      threaded, recovered + badge shown, 0 errors.
       ✅ A prompt that first produces broken code recovers automatically.
 - [x] **G — Parametric sliders.** Right "Parameters" pane: a labeled range per `params`; dragging calls
       handleParamChange → runGeneratedModel(code, newValues) → re-mesh → re-render LOCALLY. shapeRef
@@ -93,6 +96,7 @@ H (web worker). Awaiting user verification of G.
 │   ├── components/cad/         CadApp (dynamic ssr:false) → CadStage (orchestrator: prompt/history + viewport) → Viewport (R3F)
 │   ├── lib/api.ts              generateCad() → POST backend /api/generate (NEXT_PUBLIC_BACKEND_URL)
 │   ├── lib/download.ts         downloadBlob() — object-URL download trigger
+│   ├── lib/selfCorrect.ts      generateAndBuildWithRetry() — Phase F retry loop (pure/injectable)
 │   ├── lib/replicad/kernel.ts  initKernel, runGeneratedModel, decodeKernelError, exportShape (STEP/STL), meshShapeToGeometries
 │   ├── lib/empty-module.js     stub aliased for browser fs/path (see gotchas)
 │   ├── next.config.ts          turbopack.resolveAlias browser-scoped fs/path → empty stub
@@ -238,6 +242,16 @@ in `backend/src/systemPrompt.ts`. (These are exactly the class of errors Phase F
 - **State carried for later phases:** `code` (export/retry), `params`+`values` (sliders).
 - **Dev port conflict:** a `next dev` already on :3000 makes a 2nd `npm run dev` exit ("Another next
   dev server is already running") — it falls back to :3001 then aborts. Just use the running :3000.
+
+### Phase F gotchas / decisions
+- **Retry only on KERNEL/build errors, not API errors.** `generate()` throwing (network/backend/429)
+  propagates immediately — retrying can't fix quota/dead-server and would waste calls. Only `build()`
+  throwing (generated code fails in the kernel) triggers a retry. The split lives in the helper.
+- **Each retry = 1 more LLM call** (maxAttempts=3 → up to 3 calls). Combined with the free-tier 20/day
+  cap, a hard-failing prompt can chew through quota fast — that's why retries are capped at 2.
+- **Logic extracted to `lib/selfCorrect.ts`** (no React/DOM) so it's deterministically testable; the
+  kernel rarely fails on cue. Integration tested by mocking /api/generate via Playwright page.route
+  (broken→good) — no quota burned.
 
 ### Phase G gotchas / decisions
 - **Local rebuild on slider drag** = `runGeneratedModel(code, {...values, [name]: v})` → mesh → render.

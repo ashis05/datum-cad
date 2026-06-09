@@ -17,14 +17,16 @@ import {
   meshShapeToGeometries,
   exportShape,
 } from "@/lib/replicad/kernel";
-import { generateCad, type CadParam } from "@/lib/api";
+import { generateCad, type CadParam, type CadResponse } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
+import { generateAndBuildWithRetry } from "@/lib/selfCorrect";
 import Viewport from "./Viewport";
 
 interface HistoryItem {
   prompt: string;
   notes?: string;
   error?: string;
+  corrected?: boolean; // built only after one or more self-correction retries
 }
 
 export default function CadStage() {
@@ -43,6 +45,7 @@ export default function CadStage() {
   const [geometries, setGeometries] = useState<ThreeGeometry[]>([]);
   const [exportError, setExportError] = useState<string | null>(null);
   const [paramError, setParamError] = useState<string | null>(null);
+  const [retryStatus, setRetryStatus] = useState<string | null>(null);
 
   // The current BREP solid — source of truth for export (kept in a ref since
   // export doesn't need to trigger a re-render).
@@ -86,34 +89,46 @@ export default function CadStage() {
 
     setBusy(true);
     setPrompt("");
+    setRetryStatus(null);
     const historyIndex = history.length;
     setHistory((h) => [...h, { prompt: trimmed }]);
 
-    try {
-      const result = await generateCad({
-        prompt: trimmed,
-        currentCode: code ?? undefined,
-      });
-
-      // Initialize parameter values from each param's default.
+    // Build closure: run the generated code locally and mesh it. Throwing here
+    // (a kernel/build error) triggers a self-correction retry.
+    const build = (result: CadResponse) => {
       const values = Object.fromEntries(
         result.params.map((p) => [p.name, p.default]),
       );
-
-      // Run the generated code locally and mesh it for display.
       const shape = runGeneratedModel(result.code, values);
       const geos = meshShapeToGeometries(shape);
+      return { values, shape, geos };
+    };
 
-      shapeRef.current = shape;
+    try {
+      const { result, built, attempts } = await generateAndBuildWithRetry({
+        prompt: trimmed,
+        currentCode: code ?? undefined,
+        maxAttempts: 3,
+        generate: generateCad,
+        build,
+        onRetry: ({ attempt, error }) =>
+          setRetryStatus(
+            `Build failed (attempt ${attempt}): ${error} — asking the model to fix it…`,
+          ),
+      });
+
+      shapeRef.current = built.shape;
       setExportError(null);
       setParamError(null);
       setCode(result.code);
       setParams(result.params);
-      setValues(values);
-      swapGeometries(geos);
+      setValues(built.values);
+      swapGeometries(built.geos);
       setHistory((h) =>
         h.map((item, i) =>
-          i === historyIndex ? { ...item, notes: result.notes } : item,
+          i === historyIndex
+            ? { ...item, notes: result.notes, corrected: attempts > 1 }
+            : item,
         ),
       );
     } catch (err) {
@@ -125,6 +140,7 @@ export default function CadStage() {
       );
     } finally {
       setBusy(false);
+      setRetryStatus(null);
     }
   }
 
@@ -200,6 +216,11 @@ export default function CadStage() {
               </div>
               {item.notes && (
                 <div className="rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-200">
+                  {item.corrected && (
+                    <span className="mr-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                      self-corrected
+                    </span>
+                  )}
                   {item.notes}
                 </div>
               )}
@@ -211,9 +232,9 @@ export default function CadStage() {
             </div>
           ))}
           {busy && (
-            <div className="flex items-center gap-2 px-1 text-sm text-zinc-400">
-              <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-200" />
-              Generating…
+            <div className="flex items-start gap-2 px-1 text-sm text-zinc-400">
+              <div className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-200" />
+              <span>{retryStatus ?? "Generating…"}</span>
             </div>
           )}
           <div ref={historyEndRef} />
