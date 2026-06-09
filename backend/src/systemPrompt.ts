@@ -31,8 +31,23 @@ RULES
   edges when the user explicitly asks for "all edges" AND the radius is well under the smallest
   nearby feature (e.g. smaller than any hole radius and less than half the thickness).
 - Apply fillets/chamfers LAST, after cuts/holes.
+- SHAPE REUSE (critical): transforms (.translate / .translateZ / .rotate / .mirror) CONSUME the shape
+  they are called on — the original is deleted and cannot be used again. To reuse one shape in several
+  places (e.g. cut the same hole tool at two positions), call .clone() before EACH reuse:
+    const tool = drawCircle(r).sketchOnPlane('XZ').extrude(len);
+    body = body.cut(tool.clone().translate([0, y, z]));
+    body = body.cut(tool.clone().translate([0, -y, z]));
+  Or simply rebuild the tool fresh for each use. Symptom of getting this wrong: "object has been
+  deleted". (.cut / .fuse / .intersect do NOT consume their arguments — only transforms do.)
 
 REPLICAD API REFERENCE (verified, replicad 0.23)
+BUILD PIPELINE — methods are only valid at the right stage:
+  2D Drawing  --.sketchOnPlane(plane?, offset?)-->  Sketch  --.extrude(h)-->  3D Shape
+  - On a 2D Drawing: .translate([x,y]) (2D), .fillet/.chamfer of corners. Position holes here.
+  - On a Sketch: ONLY .extrude(...). A Sketch has NO .translate — move the Drawing before sketching,
+    or move the 3D Shape after extruding.
+  - On a 3D Shape: .cut/.fuse/.intersect/.fillet/.chamfer/.shell/.translate([x,y,z])/.clone, etc.
+
 2D drawings (return a Drawing):
 - drawRectangle(width, height)            // rectangle centered at origin
 - drawRoundedRectangle(width, height, r)  // r = corner radius
@@ -59,13 +74,17 @@ Primitive solids:
 - .shell(thickness)                       // hollow out (negative thickness shells inward)
 - .translate([dx, dy, dz]) / .translateZ(dz)
 - .rotate(angleDegrees, position?, direction?)
-- .clone()
+- .clone()                                // make a reusable copy BEFORE a transform consumes the original
 Edge finders (the finderFn argument to fillet/chamfer; called as e => e.someMethod(...)):
 - e.inDirection("Z")                      // edges parallel to an axis ("X" | "Y" | "Z"); vertical edges = "Z"
 - e.inPlane(planeName, offset?)           // edges lying in a plane, e.g. "XY" (top/bottom face outlines)
 - e.atDistance(distance, point?)          // edges at a distance from a point
 - e.inBox([x1,y1,z1], [x2,y2,z2])         // edges inside a box region
-- combinators: e.not(...), e.and([...]), e.either([...])
+- CHAIN finder methods to AND them: e => e.inDirection("Z").inBox([..],[..])
+- Combinators take FUNCTIONS, not finder objects:
+    e => e.either([f => f.inPlane("XY", 0), f => f.inPlane("XY", h)])   // OR of conditions
+    e => e.not(f => f.inDirection("Z"))                                  // negate
+  WRONG: e.and(e.inBox(...))  // passing a finder object throws "finderFun is not a function"
 
 EXAMPLES (all use the verified API above)
 

@@ -194,6 +194,27 @@ three **0.184.0**, @react-three/fiber **9.6.1** (peer wants react >=19 <19.3 →
   Symptom: code/prompt changes don't take effect. Fix: fully kill the :4000 listener (it can orphan
   from its tsx parent — kill the PID from `ss -ltnp | grep :4000`) and start one fresh backend.
 
+### Replicad API gaps the model keeps hitting (fixed via system-prompt rules)
+Each was a real, generalizable replicad-API misuse surfaced by complex prompts; all now documented
+in `backend/src/systemPrompt.ts`. (These are exactly the class of errors Phase F auto-corrects.)
+1. **`.fillet(r)` with no finder** rounds EVERY edge → fails around holes/thin walls. Use a finder:
+   `.fillet(r, e => e.inDirection("Z"))`. `fillet(radius, filter?: (e:EdgeFinder)=>EdgeFinder)`.
+2. **Transforms consume the shape** — `Shape.translate/rotate/mirror` call `this.delete()` and return
+   a NEW shape. Reusing the original → "object has been deleted". Fix: `shape.clone().translate(...)`
+   before each reuse, or rebuild the tool. (`.cut/.fuse/.intersect` do NOT consume args.)
+3. **Finder combinators take FUNCTIONS**: `not(fn)`, `and([fn,...])`, `either([fn,...])` (each `fn`
+   is `f => f.xxx()`); chaining finder methods ANDs them. Passing a finder object →
+   "finderFun is not a function".
+4. **Pipeline stages**: 2D Drawing → `.sketchOnPlane()` → Sketch → `.extrude()` → 3D Shape. A Sketch
+   has ONLY `.extrude` (no `.translate`). Move the Drawing (2D) or the Shape (3D), never the Sketch.
+   Symptom: "...sketchOnPlane(...).translate is not a function".
+- **Frontier note:** Flash-Lite handles 1–3 feature parts reliably. Very dense / physically
+  over-constrained prompts (e.g. 80×50×30 enclosure: 6 features, 10mm fillet on 2mm walls, circular
+  lip on a rect opening) are nondeterministic — each generation may slip on a different API. After the
+  4 rules above the enclosure prompt BUILDS, but exhaustively patching the prompt has diminishing
+  returns. The systematic fix is **Phase F (self-correction)**: feed `decodeKernelError()` output back
+  to Gemini as `previousError` and auto-retry. Prioritize Phase F over more prompt whack-a-mole.
+
 ### Phase D gotchas / decisions
 - **Code eval:** `new Function("replicad","params", code + "\\nreturn buildModel(replicad, params);")`,
   called with the full `import * as replicad from "replicad"` namespace (generated code destructures
