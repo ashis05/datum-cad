@@ -207,7 +207,7 @@ export default function CadStage() {
   return (
     <div className="flex min-h-0 flex-1">
       {/* Left pane — prompt & history */}
-      <aside className="flex w-[360px] flex-col border-r border-zinc-800 bg-[#0d121c]">
+      <aside className="flex w-[360px] shrink-0 flex-col border-r border-zinc-800 bg-[#0d121c]">
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {history.length === 0 && (
             <p className="text-sm leading-6 text-zinc-500">
@@ -275,7 +275,7 @@ export default function CadStage() {
       </aside>
 
       {/* Main pane — 3D viewport */}
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1">
         <Viewport geometries={geometries} />
         {geometries.length === 0 && !busy && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -311,7 +311,7 @@ export default function CadStage() {
 
       {/* Right pane — parameters */}
       {params.length > 0 && (
-        <aside className="flex w-72 flex-col border-l border-zinc-800 bg-[#0d121c]">
+        <aside className="flex w-72 shrink-0 flex-col border-l border-zinc-800 bg-[#0d121c]">
           <div className="border-b border-zinc-800 px-4 py-3">
             <h2 className="text-sm font-semibold text-zinc-100">Parameters</h2>
             <p className="mt-0.5 text-xs text-zinc-500">
