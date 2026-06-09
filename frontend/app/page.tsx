@@ -6,7 +6,7 @@ export default function Home() {
       <header className="flex items-baseline gap-3 border-b border-zinc-800 bg-[#0b0f17] px-5 py-3">
         <h1 className="text-lg font-semibold tracking-tight text-zinc-50">Text-to-CAD</h1>
         <span className="text-xs text-zinc-500">
-          Phase E — prompt → generate → render → export
+          Phase G — generate · live sliders · export
         </span>
       </header>
       <CadApp />

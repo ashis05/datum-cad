@@ -4,8 +4,9 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase E — STEP/STL export)
-**Branch:** `master` · **Status:** Phase E complete, awaiting user verification → then Phase F
+**Last updated:** 2026-06-09 (after Phase G — parametric sliders)
+**Branch:** `master` · **Status:** Phases A–E + G complete. Remaining: F (self-correction),
+H (web worker). Awaiting user verification of G.
 
 ---
 
@@ -62,9 +63,16 @@
       648 triangles, byte count == 84 + tris*50 (32.5KB). 0 errors.
       ✅ Both buttons download files that open correctly.
 - [ ] **F — Self-correction.** On kernel throw, auto-retry /api/generate with `previousError` 1–2×.
+      NOTE: groundwork done — `decodeKernelError()` already yields good messages; backend already
+      accepts `previousError`. F = wire the retry loop in CadStage.handleSubmit (catch build error →
+      re-call generateCad with previousError → rebuild; cap retries). DEFERRED by user; do after G.
       ✅ A prompt that first produces broken code recovers automatically.
-- [ ] **G — Parametric sliders.** Slider per `params`; dragging re-runs buildModel LOCALLY, no backend.
-      ✅ Dragging "Width" resizes instantly, no network request (verify in devtools).
+- [x] **G — Parametric sliders.** Right "Parameters" pane: a labeled range per `params`; dragging calls
+      handleParamChange → runGeneratedModel(code, newValues) → re-mesh → re-render LOCALLY. shapeRef
+      updated so export uses the tweaked solid. Old BufferGeometries disposed on each swap (GPU leak
+      guard for rapid drags). LIVE-VERIFIED 2026-06-09: 1 prompt = 1 /api/generate call; dragging
+      Length 40→200 across 4 steps kept generate calls at 1 (ZERO backend calls), model resized, 0 errors.
+      ✅ Dragging a slider resizes instantly with no network request.
 - [ ] **H — Stretch: Web Worker.** Move kernel init + compute into a Web Worker (comlink). LAST.
       ✅ Generation/param changes no longer block the main thread.
 
@@ -230,6 +238,16 @@ in `backend/src/systemPrompt.ts`. (These are exactly the class of errors Phase F
 - **State carried for later phases:** `code` (export/retry), `params`+`values` (sliders).
 - **Dev port conflict:** a `next dev` already on :3000 makes a 2nd `npm run dev` exit ("Another next
   dev server is already running") — it falls back to :3001 then aborts. Just use the running :3000.
+
+### Phase G gotchas / decisions
+- **Local rebuild on slider drag** = `runGeneratedModel(code, {...values, [name]: v})` → mesh → render.
+  No `/api/generate`. Only structural prompts hit the LLM. Big Gemini-quota saver (see quota note).
+- **`swapGeometries()` disposes old `.faces`/`.lines` BufferGeometries** before setting new ones —
+  rapid dragging would otherwise leak GPU memory. (OCCT shape memory left to replicad's GC for now.)
+- **Build errors during drag** (e.g. wall thickness > half width) are caught into `paramError` and shown
+  in the panel; the sliders stay usable (no crash).
+- Range inputs are React-controlled; to test programmatically, set value via the native setter +
+  dispatch `input` event (React onChange = input event).
 
 ### Phase E gotchas / decisions
 - **Export from the BREP, not the mesh** (brief §2). `exportShape(shape, "step"|"stl")` in kernel.ts;

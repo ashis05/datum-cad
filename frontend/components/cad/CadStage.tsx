@@ -3,6 +3,10 @@
 // Phase D — end-to-end loop: prompt -> /api/generate -> eval buildModel -> mesh
 // -> render. Boots the WASM kernel once, then each prompt fetches generated
 // Replicad code from the backend, runs it locally, and displays the solid.
+//
+// Phase G — parametric sliders: dragging a slider re-runs the SAME buildModel
+// locally with new values and re-renders. NO backend call (the key cost/UX win:
+// dimensional tweaks are instant and free; only structural prompts call the LLM).
 
 import { useEffect, useRef, useState } from "react";
 import type { ThreeGeometry } from "replicad-threejs-helper";
@@ -31,12 +35,14 @@ export default function CadStage() {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  // Current model state (params/values feed the sliders in Phase G).
+  // Current model state. params/values drive the sliders; dragging a slider
+  // re-runs buildModel locally with the new values.
   const [code, setCode] = useState<string | null>(null);
-  const [, setParams] = useState<CadParam[]>([]);
-  const [, setValues] = useState<Record<string, number>>({});
+  const [params, setParams] = useState<CadParam[]>([]);
+  const [values, setValues] = useState<Record<string, number>>({});
   const [geometries, setGeometries] = useState<ThreeGeometry[]>([]);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [paramError, setParamError] = useState<string | null>(null);
 
   // The current BREP solid — source of truth for export (kept in a ref since
   // export doesn't need to trigger a re-render).
@@ -61,6 +67,18 @@ export default function CadStage() {
   useEffect(() => {
     historyEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [history, busy]);
+
+  // Replace geometries, disposing the old BufferGeometries first so rapid slider
+  // dragging doesn't leak GPU memory.
+  function swapGeometries(next: ThreeGeometry[]) {
+    setGeometries((prev) => {
+      prev.forEach((g) => {
+        g.faces.dispose();
+        g.lines.dispose();
+      });
+      return next;
+    });
+  }
 
   async function handleSubmit() {
     const trimmed = prompt.trim();
@@ -88,10 +106,11 @@ export default function CadStage() {
 
       shapeRef.current = shape;
       setExportError(null);
+      setParamError(null);
       setCode(result.code);
       setParams(result.params);
       setValues(values);
-      setGeometries(geos);
+      swapGeometries(geos);
       setHistory((h) =>
         h.map((item, i) =>
           i === historyIndex ? { ...item, notes: result.notes } : item,
@@ -117,6 +136,24 @@ export default function CadStage() {
       setExportError(null);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Slider drag — re-run the current buildModel locally with the new value.
+  // NO backend call: dimensional tweaks are instant and free.
+  function handleParamChange(name: string, value: number) {
+    const next = { ...values, [name]: value };
+    setValues(next);
+    if (!code) return;
+    try {
+      const shape = runGeneratedModel(code, next);
+      const geos = meshShapeToGeometries(shape);
+      shapeRef.current = shape;
+      swapGeometries(geos);
+      setParamError(null);
+    } catch (err) {
+      // Keep the slider usable; surface the error without crashing.
+      setParamError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -241,6 +278,49 @@ export default function CadStage() {
           </div>
         )}
       </div>
+
+      {/* Right pane — parameters */}
+      {params.length > 0 && (
+        <aside className="flex w-72 flex-col border-l border-zinc-800 bg-[#0d121c]">
+          <div className="border-b border-zinc-800 px-4 py-3">
+            <h2 className="text-sm font-semibold text-zinc-100">Parameters</h2>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              Drag to resize instantly — no AI call.
+            </p>
+          </div>
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
+            {params.map((p) => {
+              const value = values[p.name] ?? p.default;
+              return (
+                <div key={p.name}>
+                  <div className="mb-1 flex items-baseline justify-between">
+                    <label className="text-xs text-zinc-300">{p.label}</label>
+                    <span className="font-mono text-xs text-zinc-400">{value}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={p.min}
+                    max={p.max}
+                    step={p.step}
+                    value={value}
+                    onChange={(e) => handleParamChange(p.name, Number(e.target.value))}
+                    className="w-full accent-blue-500"
+                  />
+                  <div className="mt-0.5 flex justify-between text-[10px] text-zinc-600">
+                    <span>{p.min}</span>
+                    <span>{p.max}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {paramError && (
+              <div className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+                <span className="font-medium">Build error:</span> {paramError}
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
