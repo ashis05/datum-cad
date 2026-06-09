@@ -4,8 +4,8 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase D — end-to-end loop works)
-**Branch:** `master` · **Status:** Phase D complete, awaiting user verification → then Phase E
+**Last updated:** 2026-06-09 (after Phase E — STEP/STL export)
+**Branch:** `master` · **Status:** Phase E complete, awaiting user verification → then Phase F
 
 ---
 
@@ -55,8 +55,12 @@
       LIVE-VERIFIED 2026-06-09 (headless browser): plate prompt → /api/generate 200 → solid renders,
       notes shown, 0 console/page errors.
       ✅ Type "a 40×20×10mm plate with a centered 5mm hole" → correct solid renders.
-- [ ] **E — Export.** "Download STEP" + "Download STL" from current BREP solid (`blobSTEP`/`blobSTL`).
-      ✅ Both files download and open correctly.
+- [x] **E — Export.** "Download STEP" + "Download STL" buttons (viewport top-right) from the current
+      BREP solid. `shape.blobSTEP():Blob` / `shape.blobSTL({binary:true}):Blob`; shape kept in a ref.
+      LIVE-VERIFIED 2026-06-09 (headless, real downloads): STEP = valid ISO-10303-21 w/
+      MANIFOLD_SOLID_BREP/CLOSED_SHELL + END-ISO-10303-21 terminator (19.8KB); STL = valid binary,
+      648 triangles, byte count == 84 + tris*50 (32.5KB). 0 errors.
+      ✅ Both buttons download files that open correctly.
 - [ ] **F — Self-correction.** On kernel throw, auto-retry /api/generate with `previousError` 1–2×.
       ✅ A prompt that first produces broken code recovers automatically.
 - [ ] **G — Parametric sliders.** Slider per `params`; dragging re-runs buildModel LOCALLY, no backend.
@@ -80,7 +84,8 @@
 │   ├── components/ui/button.tsx, lib/utils.ts   (shadcn)
 │   ├── components/cad/         CadApp (dynamic ssr:false) → CadStage (orchestrator: prompt/history + viewport) → Viewport (R3F)
 │   ├── lib/api.ts              generateCad() → POST backend /api/generate (NEXT_PUBLIC_BACKEND_URL)
-│   ├── lib/replicad/kernel.ts  initKernel, runGeneratedModel (new Function eval), meshShapeToGeometries, buildBoxWithHole (unused ref)
+│   ├── lib/download.ts         downloadBlob() — object-URL download trigger
+│   ├── lib/replicad/kernel.ts  initKernel, runGeneratedModel, decodeKernelError, exportShape (STEP/STL), meshShapeToGeometries
 │   ├── lib/empty-module.js     stub aliased for browser fs/path (see gotchas)
 │   ├── next.config.ts          turbopack.resolveAlias browser-scoped fs/path → empty stub
 │   ├── public/replicad_single.wasm   OCCT wasm (committed; served at /replicad_single.wasm)
@@ -226,6 +231,17 @@ in `backend/src/systemPrompt.ts`. (These are exactly the class of errors Phase F
 - **Dev port conflict:** a `next dev` already on :3000 makes a 2nd `npm run dev` exit ("Another next
   dev server is already running") — it falls back to :3001 then aborts. Just use the running :3000.
 
+### Phase E gotchas / decisions
+- **Export from the BREP, not the mesh** (brief §2). `exportShape(shape, "step"|"stl")` in kernel.ts;
+  STEP exact, STL binary. Meshing does NOT consume the shape, so the same shape renders AND exports.
+- **Shape kept in `shapeRef` (useRef)** in CadStage — export needs it but shouldn't trigger re-render.
+  Buttons live in the viewport top-right, shown only when `geometries.length > 0`.
+
+## ⚠️ Gemini free-tier quota (hit during Phase E testing)
+- **Free tier = 20 generate requests/day** for gemini-2.5-flash-lite → 429 RESOURCE_EXHAUSTED once
+  exhausted (resets daily). The backend surfaces the 429 message as the on-screen error. This is NOT
+  a bug. Mitigations: (a) Phase G makes slider tweaks LOCAL (no LLM call) — big quota saver;
+  (b) enable billing / raise quota; (c) test sparingly. If "generation fails" with a 429, it's quota.
+
 ## Open dependency
-- **GEMINI_API_KEY** — paste into `backend/.env.local`, restart backend, run the Phase C curl.
-  Server-side only; never exposed to the browser. Not needed for A/B.
+- **GEMINI_API_KEY** — in `backend/.env.local` (loaded, working). Server-side only. Free-tier 20/day.

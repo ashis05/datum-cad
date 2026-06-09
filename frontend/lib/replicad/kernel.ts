@@ -117,6 +117,18 @@ export function runGeneratedModel(
 }
 
 /**
+ * Export a solid to a downloadable Blob. STEP is exact BREP (opens in CAD);
+ * STL is tessellated (opens in slicers/mesh viewers) — binary for smaller files.
+ */
+export function exportShape(shape: Shape3D, format: "step" | "stl"): Blob {
+  try {
+    return format === "step" ? shape.blobSTEP() : shape.blobSTL({ binary: true });
+  } catch (err) {
+    throw new Error(decodeKernelError(err));
+  }
+}
+
+/**
  * Tessellate a solid into Three.js BufferGeometries (faces + edges) for
  * display. This is the DISPLAY path from the brief — the BREP solid stays the
  * source of truth; we mesh it for rendering rather than round-tripping STL.

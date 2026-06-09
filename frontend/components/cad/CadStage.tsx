@@ -6,8 +6,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ThreeGeometry } from "replicad-threejs-helper";
-import { initKernel, runGeneratedModel, meshShapeToGeometries } from "@/lib/replicad/kernel";
+import type { Shape3D } from "replicad";
+import {
+  initKernel,
+  runGeneratedModel,
+  meshShapeToGeometries,
+  exportShape,
+} from "@/lib/replicad/kernel";
 import { generateCad, type CadParam } from "@/lib/api";
+import { downloadBlob } from "@/lib/download";
 import Viewport from "./Viewport";
 
 interface HistoryItem {
@@ -29,6 +36,11 @@ export default function CadStage() {
   const [, setParams] = useState<CadParam[]>([]);
   const [, setValues] = useState<Record<string, number>>({});
   const [geometries, setGeometries] = useState<ThreeGeometry[]>([]);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // The current BREP solid — source of truth for export (kept in a ref since
+  // export doesn't need to trigger a re-render).
+  const shapeRef = useRef<Shape3D | null>(null);
 
   const historyEndRef = useRef<HTMLDivElement>(null);
 
@@ -74,6 +86,8 @@ export default function CadStage() {
       const shape = runGeneratedModel(result.code, values);
       const geos = meshShapeToGeometries(shape);
 
+      shapeRef.current = shape;
+      setExportError(null);
       setCode(result.code);
       setParams(result.params);
       setValues(values);
@@ -92,6 +106,17 @@ export default function CadStage() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  function handleExport(format: "step" | "stl") {
+    if (!shapeRef.current) return;
+    try {
+      const blob = exportShape(shapeRef.current, format);
+      downloadBlob(blob, `model.${format}`);
+      setExportError(null);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -188,6 +213,31 @@ export default function CadStage() {
         {geometries.length === 0 && !busy && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <p className="text-sm text-zinc-600">Your model will appear here</p>
+          </div>
+        )}
+
+        {/* Export controls */}
+        {geometries.length > 0 && (
+          <div className="absolute right-4 top-4 flex flex-col items-end gap-2">
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleExport("step")}
+                className="rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-100 backdrop-blur transition-colors hover:bg-zinc-800"
+              >
+                Download STEP
+              </button>
+              <button
+                onClick={() => handleExport("stl")}
+                className="rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-100 backdrop-blur transition-colors hover:bg-zinc-800"
+              >
+                Download STL
+              </button>
+            </div>
+            {exportError && (
+              <div className="max-w-xs rounded-md border border-red-900/60 bg-red-950/70 px-3 py-1.5 text-xs text-red-200 backdrop-blur">
+                Export failed: {exportError}
+              </div>
+            )}
           </div>
         )}
       </div>
