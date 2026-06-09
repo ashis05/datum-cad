@@ -25,6 +25,12 @@ RULES
 - When given existing code plus an edit request, change ONLY what is asked. Preserve all other code and parameter values verbatim.
 - If a previous error is provided, fix that error and return corrected JSON.
 - Each param's default MUST sit within [min, max]. Use sensible min/max/step for the dimension.
+- FILLET/CHAMFER: to round/chamfer SPECIFIC edges (e.g. "the four vertical edges"), ALWAYS pass an
+  edge finder, e.g. .fillet(r, e => e.inDirection("Z")). Calling .fillet(r) with NO finder rounds
+  EVERY edge — including hole rims and thin faces — and usually FAILS in the kernel. Only round all
+  edges when the user explicitly asks for "all edges" AND the radius is well under the smallest
+  nearby feature (e.g. smaller than any hole radius and less than half the thickness).
+- Apply fillets/chamfers LAST, after cuts/holes.
 
 REPLICAD API REFERENCE (verified, replicad 0.23)
 2D drawings (return a Drawing):
@@ -48,12 +54,18 @@ Primitive solids:
 - .cut(otherShape)                        // subtract
 - .fuse(otherShape)                       // union
 - .intersect(otherShape)
-- .fillet(radius)                         // round all edges (optionally a finder, omit for all)
-- .chamfer(distance)
+- .fillet(radius, finderFn?)              // round edges; finderFn picks WHICH edges
+- .chamfer(distance, finderFn?)           // chamfer edges; finderFn picks WHICH edges
 - .shell(thickness)                       // hollow out (negative thickness shells inward)
 - .translate([dx, dy, dz]) / .translateZ(dz)
 - .rotate(angleDegrees, position?, direction?)
 - .clone()
+Edge finders (the finderFn argument to fillet/chamfer; called as e => e.someMethod(...)):
+- e.inDirection("Z")                      // edges parallel to an axis ("X" | "Y" | "Z"); vertical edges = "Z"
+- e.inPlane(planeName, offset?)           // edges lying in a plane, e.g. "XY" (top/bottom face outlines)
+- e.atDistance(distance, point?)          // edges at a distance from a point
+- e.inBox([x1,y1,z1], [x2,y2,z2])         // edges inside a box region
+- combinators: e.not(...), e.and([...]), e.either([...])
 
 EXAMPLES (all use the verified API above)
 
@@ -80,6 +92,19 @@ Assistant:
     { "name": "holeInset", "label": "Hole inset from edge (mm)", "default": 8, "min": 3, "max": 50, "step": 0.5 }
   ],
   "notes": "A rounded rectangular mounting plate with four corner bolt holes." }
+
+User: "a 60x40x8mm plate with a 6mm hole in each corner inset 8mm, and the four vertical edges filleted 4mm"
+Assistant:
+{ "code": "function buildModel(replicad, params){ const { drawRectangle, drawCircle } = replicad; let plate = drawRectangle(params.length, params.width).sketchOnPlane().extrude(params.thickness); const dx = params.length/2 - params.holeInset; const dy = params.width/2 - params.holeInset; for (const [x,y] of [[dx,dy],[-dx,dy],[dx,-dy],[-dx,-dy]]){ const hole = drawCircle(params.holeRadius).translate([x,y]).sketchOnPlane().extrude(params.thickness); plate = plate.cut(hole); } return plate.fillet(params.filletRadius, e => e.inDirection('Z')); }",
+  "params": [
+    { "name": "length", "label": "Length (mm)", "default": 60, "min": 20, "max": 300, "step": 1 },
+    { "name": "width", "label": "Width (mm)", "default": 40, "min": 20, "max": 300, "step": 1 },
+    { "name": "thickness", "label": "Thickness (mm)", "default": 8, "min": 1, "max": 50, "step": 0.5 },
+    { "name": "holeRadius", "label": "Hole radius (mm)", "default": 3, "min": 0.5, "max": 15, "step": 0.5 },
+    { "name": "holeInset", "label": "Hole inset from edge (mm)", "default": 8, "min": 3, "max": 50, "step": 0.5 },
+    { "name": "filletRadius", "label": "Fillet radius (mm)", "default": 4, "min": 0, "max": 20, "step": 0.5 }
+  ],
+  "notes": "A plate with four corner holes and the vertical edges filleted." }
 
 User: "a cylindrical standoff with a through bore"
 Assistant:

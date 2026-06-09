@@ -59,6 +59,28 @@ export function buildBoxWithHole(): Shape3D {
 }
 
 /**
+ * Turn a thrown value from the kernel into a readable message.
+ *
+ * OpenCascade (via emscripten) throws native exceptions as raw NUMBERS (a
+ * pointer into WASM memory), not Error objects — that's why a bad operation
+ * surfaces as e.g. "9105936". The slim build has no message decoder, so we map
+ * it to actionable guidance (this also becomes the `previousError` fed to the
+ * self-correction retry in Phase F).
+ */
+export function decodeKernelError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "number") {
+    return (
+      `The CAD kernel rejected this geometry (OpenCascade error #${err}). ` +
+      `Common causes: a fillet/chamfer radius too large for an edge, rounding ` +
+      `edges that can't be rounded (e.g. around holes), or an invalid boolean. ` +
+      `Try a smaller radius, or apply the fillet only to specific edges.`
+    );
+  }
+  return String(err);
+}
+
+/**
  * Evaluate LLM-generated `buildModel` code and run it with the given parameter
  * values, returning the resulting solid.
  *
@@ -70,13 +92,24 @@ export function runGeneratedModel(
   code: string,
   values: Record<string, number>,
 ): Shape3D {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const factory = new Function(
-    "replicad",
-    "params",
-    `${code}\nreturn buildModel(replicad, params);`,
-  );
-  const shape = factory(replicad, values) as Shape3D;
+  let factory: (r: typeof replicad, p: Record<string, number>) => Shape3D;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    factory = new Function(
+      "replicad",
+      "params",
+      `${code}\nreturn buildModel(replicad, params);`,
+    ) as typeof factory;
+  } catch (err) {
+    throw new Error(`Generated code has a syntax error: ${decodeKernelError(err)}`);
+  }
+
+  let shape: Shape3D;
+  try {
+    shape = factory(replicad, values);
+  } catch (err) {
+    throw new Error(decodeKernelError(err));
+  }
   if (!shape) {
     throw new Error("buildModel did not return a shape.");
   }
@@ -89,12 +122,16 @@ export function runGeneratedModel(
  * source of truth; we mesh it for rendering rather than round-tripping STL.
  */
 export function meshShapeToGeometries(shape: Shape3D): ThreeGeometry[] {
-  const meshed = [
-    {
-      name: "shape",
-      faces: shape.mesh({ tolerance: 0.05, angularTolerance: 30 }),
-      edges: shape.meshEdges({ tolerance: 0.05, angularTolerance: 30 }),
-    },
-  ];
-  return syncGeometries(meshed, []);
+  try {
+    const meshed = [
+      {
+        name: "shape",
+        faces: shape.mesh({ tolerance: 0.05, angularTolerance: 30 }),
+        edges: shape.meshEdges({ tolerance: 0.05, angularTolerance: 30 }),
+      },
+    ];
+    return syncGeometries(meshed, []);
+  } catch (err) {
+    throw new Error(decodeKernelError(err));
+  }
 }

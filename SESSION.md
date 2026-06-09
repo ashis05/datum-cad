@@ -174,6 +174,26 @@ three **0.184.0**, @react-three/fiber **9.6.1** (peer wants react >=19 <19.3 →
   plate-with-hole example is the exact shape proven in Phase B. `meshEdges keepMesh` note carried
   from Phase B still applies on the frontend side.
 
+### Phase D bug fixes (post-acceptance)
+- **Opaque "Error: 9105936" = a native OpenCascade exception.** OCCT (via emscripten) throws raw
+  NUMBERS (a WASM memory pointer), not Error objects; `String(e)` shows the number. The slim
+  `replicad_single` build has NO message decoder. → `kernel.decodeKernelError()` maps a numeric throw
+  to actionable text; applied in `runGeneratedModel` (syntax + run) and `meshShapeToGeometries`.
+  This decoded message is also what Phase F will feed back as `previousError`.
+- **Root cause of that error:** model emitted `plate.fillet(r)` with NO edge finder → fillets EVERY
+  edge incl. the hole rims (r=3) with r=4 → geometrically impossible → OCCT aborts. Fix = generate
+  `.fillet(r, e => e.inDirection("Z"))` (vertical edges only). Verified the corrected code builds +
+  renders in the live app.
+- **System-prompt hardening:** added EdgeFinder cheatsheet (`inDirection`/`inPlane`/`atDistance`/
+  `inBox`/`not`/`and`/`either`), a RULE that fillet/chamfer of specific edges MUST pass a finder
+  (bare `.fillet(r)` rounds all edges and usually fails), "apply fillets LAST", and a worked
+  corner-holes+filleted-vertical-edges example. `fillet(radius, filter?: (e:EdgeFinder)=>EdgeFinder)`;
+  `Direction = "X"|"Y"|"Z"|Point`.
+- **tsx watch restart race (EADDRINUSE):** editing an imported backend src file makes `tsx watch`
+  respawn before the old process frees :4000 → new process crashes, OLD (stale) one keeps serving.
+  Symptom: code/prompt changes don't take effect. Fix: fully kill the :4000 listener (it can orphan
+  from its tsx parent — kill the PID from `ss -ltnp | grep :4000`) and start one fresh backend.
+
 ### Phase D gotchas / decisions
 - **Code eval:** `new Function("replicad","params", code + "\\nreturn buildModel(replicad, params);")`,
   called with the full `import * as replicad from "replicad"` namespace (generated code destructures
