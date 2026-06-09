@@ -4,9 +4,9 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase F — self-correction)
-**Branch:** `master` · **Status:** Phases A–G complete (all core). Remaining: H (web worker, stretch).
-Awaiting user verification of F.
+**Last updated:** 2026-06-09 (after Phase H — Web Worker; PROTOTYPE COMPLETE)
+**Branch:** `master` · **Status:** ALL phases A–H complete & verified. Prototype definition-of-done met.
+Awaiting user verification of H.
 
 ---
 
@@ -76,8 +76,16 @@ Awaiting user verification of F.
       guard for rapid drags). LIVE-VERIFIED 2026-06-09: 1 prompt = 1 /api/generate call; dragging
       Length 40→200 across 4 steps kept generate calls at 1 (ZERO backend calls), model resized, 0 errors.
       ✅ Dragging a slider resizes instantly with no network request.
-- [ ] **H — Stretch: Web Worker.** Move kernel init + compute into a Web Worker (comlink). LAST.
-      ✅ Generation/param changes no longer block the main thread.
+- [x] **H — Web Worker.** Kernel init + run + mesh + export moved into a Web Worker (comlink). Worker =
+      `lib/replicad/kernel.worker.ts` (holds the BREP solid; build/exportBlob); client =
+      `lib/replicad/kernelClient.ts` (spawns via `new Worker(new URL("./kernel.worker.ts", import.meta.url),
+      {type:"module"})`, comlink.wrap). kernel.ts is now three-free worker-core (returns raw RawMesh);
+      `lib/replicad/mesh.ts` does syncGeometries on the MAIN thread (BufferGeometry can't cross workers).
+      Slider rebuilds coalesce (trailing) so drags don't backlog the worker.
+      VERIFIED (Playwright, mocked /api/generate): a Worker spawns bundling replicad+OCCT; generate
+      renders, slider→180 with 0 backend calls, STEP+STL export valid, 0 errors. Turbopack bundled the
+      worker cleanly (browser-condition fs/path alias carried over; auto-polyfilled process/crypto).
+      ✅ Generation/param changes run off the main thread.
 
 ---
 
@@ -97,7 +105,10 @@ Awaiting user verification of F.
 │   ├── lib/api.ts              generateCad() → POST backend /api/generate (NEXT_PUBLIC_BACKEND_URL)
 │   ├── lib/download.ts         downloadBlob() — object-URL download trigger
 │   ├── lib/selfCorrect.ts      generateAndBuildWithRetry() — Phase F retry loop (pure/injectable)
-│   ├── lib/replicad/kernel.ts  initKernel, runGeneratedModel, decodeKernelError, exportShape (STEP/STL), meshShapeToGeometries
+│   ├── lib/replicad/kernel.ts        worker-core (3js-free): initKernel, runGeneratedModel, meshRaw, exportShape, decodeKernelError
+│   ├── lib/replicad/kernel.worker.ts Web Worker (comlink.expose): init/build/exportBlob; holds current BREP solid
+│   ├── lib/replicad/kernelClient.ts  main-thread client: spawns worker, initKernel/runAndMesh/exportShape (async)
+│   ├── lib/replicad/mesh.ts          main-thread: buildGeometries() = syncGeometries (raw mesh → three BufferGeometry)
 │   ├── lib/empty-module.js     stub aliased for browser fs/path (see gotchas)
 │   ├── next.config.ts          turbopack.resolveAlias browser-scoped fs/path → empty stub
 │   ├── public/replicad_single.wasm   OCCT wasm (committed; served at /replicad_single.wasm)
@@ -242,6 +253,22 @@ in `backend/src/systemPrompt.ts`. (These are exactly the class of errors Phase F
 - **State carried for later phases:** `code` (export/retry), `params`+`values` (sliders).
 - **Dev port conflict:** a `next dev` already on :3000 makes a 2nd `npm run dev` exit ("Another next
   dev server is already running") — it falls back to :3001 then aborts. Just use the running :3000.
+
+### Phase H gotchas / decisions
+- **Worker bundling worked first try** with `new Worker(new URL("./kernel.worker.ts", import.meta.url),
+  {type:"module"})` under Turbopack (the SESSION-flagged risk). The browser-condition `fs`/`path`
+  resolveAlias carried into the worker chunk; Turbopack auto-polyfilled `process`/`crypto-browserify`.
+- **three.js can't cross the worker boundary** → worker returns RawMesh (plain arrays from
+  shape.mesh/meshEdges, structured-cloneable); main thread runs `syncGeometries` (mesh.ts).
+- **BREP solid stays in the worker** (`currentShape`) so export reuses it without re-running code.
+  Main thread no longer holds the shape (shapeRef removed); export is async via the worker.
+- **Errors must escape as Error objects:** worker functions wrap throws via decodeKernelError so
+  comlink propagates a real message (a raw OCCT number wouldn't serialize usefully).
+- **selfCorrect.build is now async** (`R | Promise<R>`, awaited) — the build closure awaits runAndMesh.
+- **Slider coalescing:** handleParamChange keeps only the latest pending values while a worker build is
+  in flight (trailing), so fast drags don't queue dozens of builds. Main thread stays responsive.
+- **kernel.ts is no longer imported on the main thread** (only the worker imports it) → the 10MB OCCT
+  loader is out of the main bundle; main-thread `import type { RawMesh }` is erased at runtime.
 
 ### Phase F gotchas / decisions
 - **Retry only on KERNEL/build errors, not API errors.** `generate()` throwing (network/backend/429)

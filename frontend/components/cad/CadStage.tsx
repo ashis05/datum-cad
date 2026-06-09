@@ -10,13 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ThreeGeometry } from "replicad-threejs-helper";
-import type { Shape3D } from "replicad";
-import {
-  initKernel,
-  runGeneratedModel,
-  meshShapeToGeometries,
-  exportShape,
-} from "@/lib/replicad/kernel";
+import { initKernel, runAndMesh, exportShape } from "@/lib/replicad/kernelClient";
 import { generateCad, type CadParam, type CadResponse } from "@/lib/api";
 import { downloadBlob } from "@/lib/download";
 import { generateAndBuildWithRetry } from "@/lib/selfCorrect";
@@ -47,11 +41,14 @@ export default function CadStage() {
   const [paramError, setParamError] = useState<string | null>(null);
   const [retryStatus, setRetryStatus] = useState<string | null>(null);
 
-  // The current BREP solid — source of truth for export (kept in a ref since
-  // export doesn't need to trigger a re-render).
-  const shapeRef = useRef<Shape3D | null>(null);
-
   const historyEndRef = useRef<HTMLDivElement>(null);
+
+  // Coalesces rapid slider rebuilds: while one build is in the worker, keep only
+  // the latest pending values and build them when it returns (trailing).
+  const paramBuildRef = useRef<{
+    inFlight: boolean;
+    pending: Record<string, number> | null;
+  }>({ inFlight: false, pending: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -93,15 +90,14 @@ export default function CadStage() {
     const historyIndex = history.length;
     setHistory((h) => [...h, { prompt: trimmed }]);
 
-    // Build closure: run the generated code locally and mesh it. Throwing here
-    // (a kernel/build error) triggers a self-correction retry.
-    const build = (result: CadResponse) => {
+    // Build closure: run the generated code in the worker and mesh it. Throwing
+    // here (a kernel/build error) triggers a self-correction retry.
+    const build = async (result: CadResponse) => {
       const values = Object.fromEntries(
         result.params.map((p) => [p.name, p.default]),
       );
-      const shape = runGeneratedModel(result.code, values);
-      const geos = meshShapeToGeometries(shape);
-      return { values, shape, geos };
+      const geos = await runAndMesh(result.code, values);
+      return { values, geos };
     };
 
     try {
@@ -117,7 +113,6 @@ export default function CadStage() {
           ),
       });
 
-      shapeRef.current = built.shape;
       setExportError(null);
       setParamError(null);
       setCode(result.code);
@@ -144,10 +139,10 @@ export default function CadStage() {
     }
   }
 
-  function handleExport(format: "step" | "stl") {
-    if (!shapeRef.current) return;
+  async function handleExport(format: "step" | "stl") {
+    if (geometries.length === 0) return;
     try {
-      const blob = exportShape(shapeRef.current, format);
+      const blob = await exportShape(format);
       downloadBlob(blob, `model.${format}`);
       setExportError(null);
     } catch (err) {
@@ -155,22 +150,36 @@ export default function CadStage() {
     }
   }
 
-  // Slider drag — re-run the current buildModel locally with the new value.
-  // NO backend call: dimensional tweaks are instant and free.
+  // Slider drag — re-run the current buildModel in the worker with the new value.
+  // NO backend call: dimensional tweaks are free. Rapid drags are coalesced so
+  // only the latest value is built once the in-flight build returns.
   function handleParamChange(name: string, value: number) {
     const next = { ...values, [name]: value };
     setValues(next);
     if (!code) return;
-    try {
-      const shape = runGeneratedModel(code, next);
-      const geos = meshShapeToGeometries(shape);
-      shapeRef.current = shape;
-      swapGeometries(geos);
-      setParamError(null);
-    } catch (err) {
-      // Keep the slider usable; surface the error without crashing.
-      setParamError(err instanceof Error ? err.message : String(err));
+
+    const ref = paramBuildRef.current;
+    if (ref.inFlight) {
+      ref.pending = next; // supersede; the running loop will pick this up
+      return;
     }
+    ref.inFlight = true;
+    void (async () => {
+      let target: Record<string, number> | null = next;
+      try {
+        while (target) {
+          const geos = await runAndMesh(code, target);
+          swapGeometries(geos);
+          setParamError(null);
+          target = ref.pending;
+          ref.pending = null;
+        }
+      } catch (err) {
+        setParamError(err instanceof Error ? err.message : String(err));
+      } finally {
+        ref.inFlight = false;
+      }
+    })();
   }
 
   if (kernelError) {

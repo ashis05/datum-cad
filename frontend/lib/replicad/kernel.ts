@@ -1,20 +1,27 @@
-// Replicad kernel: loads opencascade.js (OCCT as WebAssembly) and injects it
-// into replicad via setOC. MUST run in the browser only — the WASM kernel
-// cannot run on the Node server, so every caller is a client component that is
-// dynamically imported with { ssr: false }.
+// Replicad kernel core (Phase H: runs inside the Web Worker).
+//
+// Loads opencascade.js (OCCT as WebAssembly) and injects it into replicad via
+// setOC, then runs/meshes/exports shapes. This module is intentionally free of
+// three.js / DOM so it can run in a worker; turning the raw mesh into three.js
+// BufferGeometry happens on the main thread (see ./mesh.ts).
 //
 // API surface verified against the installed packages (replicad 0.23.x):
 //   - loader:  replicad-opencascadejs/src/replicad_single.js  (+ .wasm)
 //   - setOC:   (oc: OpenCascadeInstance) => void
-//   - meshing: shape.mesh({ tolerance, angularTolerance }) / shape.meshEdges({ keepMesh })
+//   - meshing: shape.mesh({ tolerance, angularTolerance }) / shape.meshEdges({ ... })
 
 import opencascade from "replicad-opencascadejs/src/replicad_single.js";
 import type { OpenCascadeInstance } from "replicad-opencascadejs/src/replicad_single.js";
 import * as replicad from "replicad";
 import { setOC, drawRectangle, drawCircle } from "replicad";
 import type { Shape3D } from "replicad";
-import { syncGeometries } from "replicad-threejs-helper";
-import type { ThreeGeometry } from "replicad-threejs-helper";
+
+// Raw, structured-cloneable mesh data (plain arrays) — safe to pass from the
+// worker to the main thread, which converts it to three.js geometry.
+export interface RawMesh {
+  faces: ReturnType<Shape3D["mesh"]>;
+  edges: ReturnType<Shape3D["meshEdges"]>;
+}
 
 // The published .d.ts types the factory as init() with no args, but the real
 // emscripten module accepts { locateFile }. Cast to the real signature.
@@ -129,20 +136,17 @@ export function exportShape(shape: Shape3D, format: "step" | "stl"): Blob {
 }
 
 /**
- * Tessellate a solid into Three.js BufferGeometries (faces + edges) for
- * display. This is the DISPLAY path from the brief — the BREP solid stays the
- * source of truth; we mesh it for rendering rather than round-tripping STL.
+ * Tessellate a solid into raw mesh data (faces + edges) for display. This is the
+ * DISPLAY path from the brief — the BREP solid stays the source of truth; we
+ * mesh it for rendering rather than round-tripping STL. Returns plain arrays so
+ * the result can be transferred from the worker to the main thread.
  */
-export function meshShapeToGeometries(shape: Shape3D): ThreeGeometry[] {
+export function meshRaw(shape: Shape3D): RawMesh {
   try {
-    const meshed = [
-      {
-        name: "shape",
-        faces: shape.mesh({ tolerance: 0.05, angularTolerance: 30 }),
-        edges: shape.meshEdges({ tolerance: 0.05, angularTolerance: 30 }),
-      },
-    ];
-    return syncGeometries(meshed, []);
+    return {
+      faces: shape.mesh({ tolerance: 0.05, angularTolerance: 30 }),
+      edges: shape.meshEdges({ tolerance: 0.05, angularTolerance: 30 }),
+    };
   } catch (err) {
     throw new Error(decodeKernelError(err));
   }

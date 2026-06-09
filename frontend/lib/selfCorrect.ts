@@ -34,7 +34,7 @@ export async function generateAndBuildWithRetry<R>(opts: {
   currentCode?: string;
   maxAttempts?: number;
   generate: (req: GenerateRequest) => Promise<CadResponse>;
-  build: (result: CadResponse) => R; // throws on kernel/build failure
+  build: (result: CadResponse) => R | Promise<R>; // throws/rejects on kernel/build failure
   onRetry?: (info: RetryInfo) => void;
 }): Promise<GenerateAndBuildResult<R>> {
   const maxAttempts = opts.maxAttempts ?? 3;
@@ -50,7 +50,7 @@ export async function generateAndBuildWithRetry<R>(opts: {
     });
 
     try {
-      const built = opts.build(result);
+      const built = await opts.build(result);
       return { result, built, attempts: attempt };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
