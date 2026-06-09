@@ -4,8 +4,8 @@
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).
 
-**Last updated:** 2026-06-09 (after Phase A + shadcn fix)
-**Branch:** `master` · **Status:** Phase A complete, awaiting user verification → then Phase B
+**Last updated:** 2026-06-09 (after Phase B — Replicad renders)
+**Branch:** `master` · **Status:** Phase B complete, awaiting user verification → then Phase C
 
 ---
 
@@ -41,10 +41,10 @@
 - [x] **A — Scaffold.** npm workspaces; frontend (Next+TS+Tailwind+shadcn) + backend (Express+TS)
       boot from one root `dev`. Backend `/health`, frontend placeholder.
       ✅ Verify: `npm run dev` → :3000 shows "Text-to-CAD"; `curl :4000/health` → `{"status":"ok"}`.
-- [ ] **B — Prove Replicad renders (NO LLM).** Client-only `ssr:false` component: init opencascade.js,
+- [x] **B — Prove Replicad renders (NO LLM).** Client-only `ssr:false` component: init opencascade.js,
       `setOC`, build a HARDCODED box-with-hole, mesh faces+edges, render in R3F w/ OrbitControls,
-      grid, light. ⚠️ HIGHEST RISK (WASM-in-Next). Verify docs/paths first.
-      ✅ A hardcoded 3D solid appears and orbits.
+      grid, light. ⚠️ HIGHEST RISK (WASM-in-Next) — SOLVED, see gotchas.
+      ✅ Verify: `npm run dev` → :3000 shows a blue 40×20×10mm plate w/ centered hole, orbits.
 - [ ] **C — Backend ↔ Gemini (NO frontend wiring).** `POST /api/generate` → Gemini 2.5 Flash-Lite via
       `@google/genai`, §5.1 system prompt w/ verified Replicad cheatsheet + examples, JSON output
       mode, temp ≈0.1. Needs real GEMINI_API_KEY.
@@ -71,9 +71,14 @@
 ├── prototype.md        LOCKED spec (source of truth)
 ├── SESSION.md          this file
 ├── frontend/           Next 16 (App Router) + TS + Tailwind v4 + shadcn/ui
-│   ├── app/{layout,page}.tsx   placeholder "Text-to-CAD" page
+│   ├── app/{layout,page}.tsx   page renders <CadApp/> (header + 3D viewport)
 │   ├── app/globals.css         imports tailwindcss, tw-animate-css, shadcn/tailwind.css
 │   ├── components/ui/button.tsx, lib/utils.ts   (shadcn)
+│   ├── components/cad/         Phase B: CadApp (dynamic ssr:false) → CadStage (kernel init/build/mesh) → Viewport (R3F)
+│   ├── lib/replicad/kernel.ts  initKernel (load OCCT wasm + setOC), buildBoxWithHole, meshShapeToGeometries
+│   ├── lib/empty-module.js     stub aliased for browser fs/path (see gotchas)
+│   ├── next.config.ts          turbopack.resolveAlias browser-scoped fs/path → empty stub
+│   ├── public/replicad_single.wasm   OCCT wasm (committed; served at /replicad_single.wasm)
 │   └── .env.local      NEXT_PUBLIC_BACKEND_URL=http://localhost:4000 (gitignored)
 └── backend/            Express + TS proxy
     ├── src/index.ts    /health route; /api/generate added in Phase C
@@ -85,9 +90,16 @@
 **Toolchain (verified on the original dev machine):** Node v22.19, npm 10.9, Next **16.2.7**
 (Turbopack — see gotchas), React **19.2.4**, Tailwind **v4**, shadcn (base-ui based).
 
+**Verified package versions (installed):** replicad **0.23.1**, replicad-opencascadejs **0.23.0**
+(ships `src/replicad_single.{js,wasm}` — confirmed), replicad-threejs-helper **0.23.0**,
+three **0.184.0**, @react-three/fiber **9.6.1** (peer wants react >=19 <19.3 → our 19.2.4 OK),
+@react-three/drei **10.7.7**.
+
 **Commits so far:**
 - `597d28e` Phase A: monorepo scaffold
 - `8ff98af` Phase A fix: restore shadcn dependency
+- `63869bf` docs: add SESSION.md
+- (this commit) Phase B: Replicad/OCCT renders in R3F
 
 ---
 
@@ -109,6 +121,32 @@
   `replicad-threejs-helper` (`syncGeometries`/`syncFaces`). Init: `setOC(await opencascade({locateFile}))`.
 - **R3F stack:** `@react-three/fiber` + `@react-three/drei` (OrbitControls, Grid) over three.js.
   Component must be `"use client"` and dynamically imported with `{ ssr:false }`.
+
+### Phase B gotchas (the WASM-in-Next risk — SOLVED)
+- **Turbopack `Can't resolve 'fs'/'path'` (THE blocker).** Both `replicad-opencascadejs/src/replicad_single.js`
+  AND `replicad/dist/replicad.js` (bundled opentype font parser) contain dead, browser-unreachable
+  `require("fs")/require("path")` branches that Turbopack still STATICALLY resolves → build 500s.
+  Fix in `next.config.ts`: `turbopack.resolveAlias` mapping `fs`/`path`/`node:fs`/`node:path` to an
+  empty stub — but **two non-obvious rules**:
+    1. **Must scope to the `browser` condition** — `{ fs: { browser: "./lib/empty-module.js" }, ... }`.
+       A global alias breaks Next's own SSR code (it legitimately needs real `path`/`fs`).
+    2. **Alias target must be a PROJECT-RELATIVE path** (`"./lib/empty-module.js"`), NOT an absolute
+       FS path — Turbopack mangles absolute paths (prepends `.` → `./home/...` → not found).
+- **`next.config.ts` change auto-restarts the dev server** (don't manually `pkill`/restart — it races).
+- **`ssr:false` dynamic import must live in a client component** (Next 15+). Hence the thin
+  `CadApp.tsx ("use client")` → `dynamic(() => import("./CadStage"), { ssr:false })` boundary;
+  `app/page.tsx` (server) just renders `<CadApp/>`.
+- **`shape.meshEdges({ keepMesh: true })` is STALE** — in 0.23 the typed signature is
+  `meshEdges({ tolerance, angularTolerance })`. The threejs-helper README is out of date here.
+- **`syncGeometries(meshes, [])`** returns `{ faces: BufferGeometry, lines: BufferGeometry }[]`.
+  Render faces as `<mesh>` + `meshStandardMaterial` (needs light), lines as `<lineSegments>` +
+  `lineBasicMaterial`. Add `polygonOffset` to the face material so edges don't z-fight.
+- **OCCT loader `.d.ts` types the factory as `init()` (no args)** but the real emscripten module
+  takes `{ locateFile }` — cast it: `(opencascade as unknown as OCFactory)({ locateFile })`.
+- **Full-height viewport:** R3F `<Canvas>` sizes to its parent. The flex chain must resolve height —
+  `body h-full` (NOT `min-h-full`) + `min-h-0` on the flex-1 ancestors, else the canvas collapses
+  to ~150px.
+- **The `.wasm` (~10.8MB) is committed to `frontend/public/`** so the build resumes on any device.
 
 ## Open dependency
 - **GEMINI_API_KEY** required for Phase C acceptance (server-side only). Not needed for A/B.
