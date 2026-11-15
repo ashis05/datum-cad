@@ -1,5 +1,10 @@
 # SESSION — Text-to-CAD prototype (handoff / resume state)
 
+> **2026-11-15 — superseded layout.** This log describes the original prototype (frontend/ +
+> Express backend/). The repo is now a single Next.js app at the root: the Gemini proxy lives in
+> `app/api/generate/route.ts` + `lib/server/`, the key goes in `.env.local` at the root, and
+> `npm run dev` starts everything. See the README for current setup. The gotchas below still apply.
+
 > **Purpose:** portable, in-repo memory so this build can be resumed from any device.
 > A fresh Claude/agent session should **read this file first**, then `prototype.md`.
 > Keep this file updated at every phase boundary (it's committed to git).

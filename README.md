@@ -1,84 +1,115 @@
-# Text-to-CAD (prototype)
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/readme/sheet-mobile.svg">
+    <img src="docs/readme/sheet.svg" alt="CAD Designer, drawn as an engineering sheet. Describe a part in plain English. An LLM writes parametric Replicad code, OpenCascade builds an exact solid in your browser, and you export STEP or STL. Pipeline: prompt, Gemini, OpenCascade kernel in a Web Worker, viewport, export." width="100%">
+  </picture>
+</p>
 
-Type a natural-language prompt ("a 40×20×10 mm plate with a centered 5 mm hole"),
-an LLM writes parametric CAD code, and that code runs **entirely in your browser**
-to produce an exact solid — displayed live in 3D and exportable as STEP/STL.
+<details>
+<summary><b>More views</b></summary>
+<br>
+<table>
+<tr>
+<td align="center" width="60%"><img src="docs/readme/shots/desktop-empty.png" alt="Empty workbench with example prompts" width="100%"><br><sub>Empty workbench with example prompts</sub></td>
+<td align="center" width="20%"><img src="docs/readme/shots/mobile-empty.png" alt="Phone, empty" width="100%"><br><sub>Phone</sub></td>
+<td align="center" width="20%"><img src="docs/readme/shots/mobile-params.png" alt="Phone, parameters tab" width="100%"><br><sub>Parameters tab</sub></td>
+</tr>
+</table>
+</details>
 
-This is a **local single-user prototype**, not a product. No auth, accounts,
-databases, or deployment config.
+---
 
-## Pipeline
+## How it works
 
 ```
-prompt → Express proxy (holds Gemini key) → Gemini 2.5 Flash-Lite → { code, params, notes }
-      → browser Web Worker: Replicad + opencascade.js (OCCT/WASM) → BREP solid (source of truth)
-      → mesh → React Three Fiber (display)   and   → STEP/STL Blob (download)
+prompt ──▶ /api/generate ──▶ Gemini 2.5 Flash-Lite ──▶ { code, params, notes }
+                (server; holds the key)                         │
+                                                                ▼
+             Web Worker: Replicad + OpenCascade (WASM) ──▶ exact BREP solid
+                     │                                         │
+                     ▼                                         ▼
+          mesh ──▶ three.js viewport                 STEP / STL download
 ```
 
-- The **BREP solid is the source of truth.** Display = tessellated mesh; STL is only an export format.
-- The Gemini API key stays **server-side**; the browser never sees it.
-- All CAD computation runs **client-side**, inside a **Web Worker** (so the UI never freezes).
+- **The BREP solid is the source of truth.** The viewport shows a mesh of it; exports come from the solid itself.
+- **Sliders never call the AI.** Every dimension the model declares becomes a parameter, and dragging one re-runs the same code in the worker.
+- **Broken code fixes itself.** If the kernel rejects the generated code, the decoded error and the code go back to the model, up to two retries.
+- **The key never reaches the browser.** The Gemini key lives in the server route only.
 
-## Stack
+## Run it locally
 
-- **frontend/** — Next.js (App Router) + TypeScript + Tailwind + shadcn/ui, React Three Fiber,
-  Replicad + `replicad-opencascadejs` (OCCT as WASM) in a Web Worker via comlink. Runs on **:3000**.
-- **backend/** — Express + TypeScript LLM proxy using `@google/genai`. Runs on **:4000**.
-- npm workspaces monorepo; one root `dev` script runs both.
-
-## Setup
+Needs Node 20+ and a [Google AI Studio](https://aistudio.google.com/apikey) key (the free tier works).
 
 ```bash
-# 1. Install (from the repo root — workspaces hoist to one lockfile)
 npm install
-
-# 2. Add your Gemini API key (server-side only; .env.local is gitignored)
-cp backend/.env.example backend/.env.local
-#   then edit backend/.env.local and set GEMINI_API_KEY=...
-
-# 3. Run both apps
-npm run dev
+cp .env.example .env.local      # then set GEMINI_API_KEY in .env.local
+npm run dev                     # http://localhost:3000
 ```
 
-Then open http://localhost:3000.
+| Variable | Required | Default | What it does |
+|---|---|---|---|
+| `GEMINI_API_KEY` | yes | | Server-side key for the generate route |
+| `GEMINI_MODEL` | no | `gemini-2.5-flash-lite` | Model id, if you want a different one |
+| `RATE_LIMIT_PER_MINUTE` | no | `8` | Generate requests per IP per minute |
+| `RATE_LIMIT_PER_DAY` | no | `60` | Generate requests per IP per day |
+| `NEXT_PUBLIC_SITE_URL` | no | `http://localhost:3000` | Absolute URL used for Open Graph images |
 
-### Environment variables
+## Deploy on Vercel
 
-`backend/.env.local`:
-- `GEMINI_API_KEY` — your Google Gemini API key (**required**, server-side only).
-- `PORT` — backend port (default `4000`).
-- `CORS_ORIGIN` — allowed origin (default `http://localhost:3000`).
-- `GEMINI_MODEL` — optional model override (default `gemini-2.5-flash-lite`).
+It's a plain Next.js app at the repo root, so no config file is needed:
 
-`frontend/.env.local`:
-- `NEXT_PUBLIC_BACKEND_URL` — backend URL (default `http://localhost:4000`).
+1. Import the repo in Vercel (framework preset: Next.js).
+2. Add `GEMINI_API_KEY` (and `NEXT_PUBLIC_SITE_URL` set to your domain) under Environment Variables.
+3. Deploy.
 
-> **Gemini free tier:** ~20 generation requests/day. Exhausting it returns HTTP 429
-> ("generation failed" on screen) until it resets. Dragging parameter sliders does **not**
-> call the LLM (it re-runs the model locally), so dimensional tweaks are free.
+The 10.8 MB OpenCascade WASM ships from `public/` as a static file; all CAD work runs in the visitor's browser, so the server only proxies the model call.
 
-## Using it
+## Scripts
 
-1. Describe a part in the left pane and press **Send** (Enter; Shift+Enter for a newline).
-2. The model generates code, builds the solid in the worker, and renders it. Orbit/zoom with the mouse.
-3. Drag sliders in the **Parameters** pane to resize instantly (no AI call).
-4. Click **Download STEP** (exact, opens in CAD) or **Download STL** (mesh, opens in slicers).
-5. Structural edits ("add a hole") re-prompt the LLM, passing the current code so it edits in place.
-6. If generated code fails in the kernel, the app auto-retries with the error (self-correction) up
-   to twice before surfacing it.
+| Command | |
+|---|---|
+| `npm run dev` | Dev server |
+| `npm run build` / `npm start` | Production build and server |
+| `npm test` | Vitest: self-correction loop, output sanitising, rate limiter, API route |
+| `npm run lint` · `npm run typecheck` | ESLint · TypeScript |
 
-## ⚠️ Security caveat (prototype only)
+## Project layout
 
-Generated model code is executed with `new Function(...)` — i.e. **the browser runs LLM-authored
-JavaScript**. This runs inside the Web Worker, which has no DOM access, but a worker is **not** a
-security sandbox: it can still make network requests and consume CPU/memory. There are **no time or
-resource limits**.
+```
+app/
+  api/generate/route.ts   POST: validate, rate-limit, call Gemini, map errors
+  api/health/route.ts     GET: status, model, whether a key is set
+  page.tsx · layout.tsx   the workbench page, metadata, OG image, icon
+components/cad/           CadStage (layout), useCadSession (state), Viewport,
+                          Conversation, ParamPanel, ViewportToolbar, TopBar
+lib/
+  server/                 gemini.ts, systemPrompt.ts (Replicad cheatsheet),
+                          sanitize.ts, rateLimit.ts
+  replicad/               kernel.worker.ts, kernel.ts, kernelClient.ts, mesh.ts
+  selfCorrect.ts          generate → build → retry with the decoded error
+  api.ts                  browser client + shared error codes
+public/replicad_single.wasm   OpenCascade compiled to WebAssembly
+docs/                     original spec, build log, README image tooling
+```
 
-This is acceptable for a **local, single-user prototype**. Do **not** ship this as-is. Before any
-multi-user/production use, execute generated code in a hardened sandbox with strict CSP and
-time/memory limits (and treat all generated code as untrusted).
+## Limits worth knowing
 
-## Out of scope
+- **Free-tier quota.** Gemini's free tier allows about 20 generations a day for Flash-Lite. Slider changes are free; each self-correction retry costs one generation.
+- **Rate limiting is per server instance.** It stops casual abuse; for a busy public deployment, also put a limit in front (for example Vercel's firewall rules).
+- **Generated code runs in your browser.** It runs inside the Web Worker with network and messaging globals hidden from it and a 20-second build timeout, but it is still model-written JavaScript.
+- **Simple and medium parts work best.** One to a few features (plates, brackets, flanges, standoffs, trays) build reliably. Dense parts with many interacting fillets may need a follow-up prompt.
 
-Auth, accounts, databases, payments, deployment/hosting, multi-user, image input, assemblies/
-multi-part models, mobile polish.
+## Regenerating the README images
+
+```bash
+cd docs/readme
+npm install --no-save --no-package-lock playwright && npx playwright install chromium   # once
+node shoot.cjs          # needs the app running at http://localhost:3000; reuses shots/fixture.json
+python3 make_svg.py     # rebuilds sheet.svg + sheet-mobile.svg
+```
+
+`shoot.cjs` only calls Gemini when `shots/fixture.json` is missing; delete it to draw a new part.
+
+## License
+
+[MIT](LICENSE) © 2026 Ashis Wadhwani
