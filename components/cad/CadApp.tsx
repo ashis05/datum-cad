@@ -5,12 +5,14 @@
 // ssr:false in a client component — hence this thin boundary.
 
 import dynamic from "next/dynamic";
+import TopBar from "./TopBar";
 
 const CadStage = dynamic(() => import("./CadStage"), {
   ssr: false,
   loading: () => (
-    <div className="flex flex-1 items-center justify-center bg-[#0b0f17] text-sm text-zinc-400">
-      Initializing viewport…
+    <div className="flex min-h-0 flex-1 flex-col">
+      <TopBar status="loading" />
+      <div className="viewport-bg flex-1" />
     </div>
   ),
 });

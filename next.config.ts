@@ -5,6 +5,7 @@ import type { NextConfig } from "next";
 const emptyModule = "./lib/empty-module.js";
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
   // replicad and replicad-opencascadejs ship Node-only code paths
   // (require("fs") / require("path")) that are unreachable in the browser but
   // still statically resolved by the bundler. Alias them to an empty module so
