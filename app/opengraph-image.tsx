@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "CAD Designer — Describe a part. Get a real solid.";
+export const alt = "Datum — Describe a part. Get a real solid.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -26,7 +26,7 @@ export default function OpengraphImage() {
               <path d="M16 16 6 9.25M16 16l10-6.75M16 16v12.5" />
             </g>
           </svg>
-          <div style={{ marginTop: 40, fontSize: 88, fontWeight: 700, color: "#e8ebf0", letterSpacing: -2 }}>CAD Designer</div>
+          <div style={{ marginTop: 40, fontSize: 88, fontWeight: 700, color: "#e8ebf0", letterSpacing: -2 }}>Datum</div>
           <div style={{ marginTop: 12, fontSize: 40, color: "#9aa3b2" }}>Describe a part. Get a real solid.</div>
           <div style={{ marginTop: 48, fontSize: 26, color: "#4cc9f0", fontFamily: "monospace" }}>
             prompt → Replicad → OpenCascade → STEP / STL

@@ -1,5 +1,5 @@
 {
-  "name": "cad-designer",
+  "name": "datum",
   "version": "1.0.0",
   "private": true,
   "description": "Text-to-CAD in the browser: describe a part, an LLM writes Replicad code, and OpenCascade (WASM) builds an exact solid you can tweak and export as STEP/STL.",

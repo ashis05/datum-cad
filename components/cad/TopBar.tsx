@@ -22,7 +22,7 @@ export default function TopBar({ status }: { status: KernelStatus }) {
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3 sm:px-4">
       <div className="flex min-w-0 items-center gap-2.5">
         <Logo className="size-6 shrink-0" />
-        <span className="truncate text-[15px] font-semibold tracking-tight text-text">CAD Designer</span>
+        <span className="truncate text-[15px] font-semibold tracking-tight text-text">Datum</span>
         <span className="mx-1 hidden h-4 w-px bg-line-strong md:block" />
         <span className="hidden text-xs text-text-3 md:block">Describe a part. Get a real solid.</span>
       </div>
@@ -35,7 +35,7 @@ export default function TopBar({ status }: { status: KernelStatus }) {
           <span>{s.label}</span>
         </div>
         <a
-          href="https://github.com/ashis05/CAD_Designer"
+          href="https://github.com/ashis05/datum-cad"
           target="_blank"
           rel="noreferrer noopener"
           aria-label="View source on GitHub"

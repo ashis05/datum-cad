@@ -1,9 +1,11 @@
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/readme/sheet-mobile.svg">
-    <img src="docs/readme/sheet.svg" alt="CAD Designer, drawn as an engineering sheet. Describe a part in plain English. An LLM writes parametric Replicad code, OpenCascade builds an exact solid in your browser, and you export STEP or STL. Pipeline: prompt, Gemini, OpenCascade kernel in a Web Worker, viewport, export." width="100%">
+    <img src="docs/readme/sheet.svg" alt="Datum, drawn as an engineering sheet. Describe a part in plain English. An LLM writes parametric Replicad code, OpenCascade builds an exact solid in your browser, and you export STEP or STL. Pipeline: prompt, Gemini, OpenCascade kernel in a Web Worker, viewport, export." width="100%">
   </picture>
 </p>
+
+<p align="center"><b><a href="https://datum.ashiswadhwani.in">datum.ashiswadhwani.in</a></b> · describe a part, get a real solid</p>
 
 <details>
 <summary><b>More views</b></summary>
@@ -59,8 +61,8 @@ npm run dev                     # http://localhost:3000
 It's a plain Next.js app at the repo root, so no config file is needed:
 
 1. Import the repo in Vercel (framework preset: Next.js).
-2. Add `GEMINI_API_KEY` (and `NEXT_PUBLIC_SITE_URL` set to your domain) under Environment Variables.
-3. Deploy.
+2. Add `GEMINI_API_KEY` and `NEXT_PUBLIC_SITE_URL` (for this deployment, `https://datum.ashiswadhwani.in`) under Environment Variables.
+3. Deploy. Every push to `master` redeploys production.
 
 The 10.8 MB OpenCascade WASM ships from `public/` as a static file; all CAD work runs in the visitor's browser, so the server only proxies the model call.
 

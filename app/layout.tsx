@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const title = "CAD Designer — text to CAD in your browser";
+const title = "Datum — text to CAD in your browser";
 const description =
   "Describe a part in plain English. An LLM writes parametric Replicad code, OpenCascade builds an exact solid in your browser, and you export STEP or STL.";
 
@@ -20,8 +20,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"),
   title,
   description,
-  applicationName: "CAD Designer",
-  openGraph: { title, description, siteName: "CAD Designer", type: "website" },
+  applicationName: "Datum",
+  openGraph: { title, description, siteName: "Datum", type: "website" },
   twitter: { card: "summary_large_image", title, description },
 };
 

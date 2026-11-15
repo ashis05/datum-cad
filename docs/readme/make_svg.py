@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the README header images: docs/readme/sheet.svg (desktop) and sheet-mobile.svg (phone).
+"""Build Datum's README header images: docs/readme/sheet.svg (desktop) and sheet-mobile.svg (phone).
 
     python3 docs/readme/make_svg.py
 
@@ -19,6 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 SHOTS = HERE / "shots"
+SITE = "datum.ashiswadhwani.in"
 VERSION = json.loads((ROOT / "package.json").read_text())["version"]
 
 # ---------------------------------------------------------------- palette (blueprint)
@@ -142,7 +143,7 @@ class Sheet:
         m, LX, RX = self.m, self.LX, self.RX
         y = self.B + (34 if m else 44)
         self.rise(0)
-        self.text(LX, y, f"DWG NO. CD-001 · REV {VERSION}", 11 if m else 12, INK_3, MONO, spacing=1.6)
+        self.text(LX, y, f"DWG NO. DTM-001 · REV {VERSION}", 11 if m else 12, INK_3, MONO, spacing=1.6)
         if not m:
             self.text(RX, y, "TEXT → SOLID · IN THE BROWSER", 12, INK_3, MONO, "end", 1.6)
         self.end()
@@ -164,10 +165,10 @@ class Sheet:
 
         tx = cx + s + (22 if m else 34)
         self.rise(.25)
-        self.text(tx, cy - (2 if m else 6), "CAD", 36 if m else 58, INK, MONO, weight=700, spacing=2)
-        self.text(tx, cy + (36 if m else 54), "DESIGNER", 36 if m else 58, INK, MONO, weight=700, spacing=2)
+        ts = 54 if m else 96
+        self.text(tx, cy + ts * .36, "DATUM", ts, INK, MONO, weight=700, spacing=6 if m else 10)
         self.end()
-        title_w = 8 * (36 if m else 58) * .6 + 14
+        title_w = 5 * ts * .6 + 4 * (6 if m else 10)
         self.dim_h(tx, tx + title_w, cy + (58 if m else 86), "TYPE IT · BUILD IT", .55, 10 if m else 11)
 
         y = cy + s + (68 if m else 96)
@@ -354,13 +355,16 @@ class Sheet:
         m, LX, RX = self.m, self.LX, self.RX
         w = RX - LX if m else 470
         x = RX - w
-        rows = [("PROJECT", "CAD Designer"), ("DRAWN BY", "ashis05"), ("UNITS", "mm"),
+        rows = [("PROJECT", "Datum"), ("DRAWN BY", "ashis05"), ("UNITS", "mm"),
                 ("SCALE", "1:1"), ("REV", VERSION), ("SHEET", "1 OF 1")]
         rh = 30
         cols = 2
         cw = w / cols
         self.rise(4.1)
-        self.add(f'<rect x="{x}" y="{y}" width="{w}" height="{rh * 3}" fill="{GROUND_2}" stroke="{INK}" stroke-width="1.4"/>')
+        self.add(f'<rect x="{x}" y="{y}" width="{w}" height="{rh * 4}" fill="{GROUND_2}" stroke="{INK}" stroke-width="1.4"/>')
+        self.add(f'<rect x="{x}" y="{y + rh * 3}" width="{w}" height="{rh}" fill="none" stroke="{INK}" stroke-opacity=".45"/>')
+        self.text(f"{x + 10:.1f}", y + rh * 3 + 19, "SITE", 9.5, INK_3, MONO, spacing=1.4)
+        self.text(f"{x + w - 10:.1f}", y + rh * 3 + 20, SITE, 12.5, CYAN, MONO, "end")
         for i, (k, v) in enumerate(rows):
             cx = x + (i % cols) * cw
             cy = y + (i // cols) * rh
@@ -371,7 +375,7 @@ class Sheet:
             self.text(LX, y + 40, "Units in millimetres.", 12, INK_3, MONO)
             self.text(LX, y + 60, "Open source under MIT.", 12, INK_3, MONO)
         self.end()
-        return y + rh * 3
+        return y + rh * 4
 
     # ------------------------------------------------------------ frame
     def build(self):
@@ -392,7 +396,7 @@ class Sheet:
 
     def frame(self, H):
         W, M, B, m = self.W, self.M, self.B, self.m
-        self.add(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="CAD Designer. '
+        self.add(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img" aria-label="Datum. '
                  f'Describe a part, get a real solid. {esc(BRIEF)}">')
         self.add("""<style>
     .rise{opacity:0;animation:rise 1s cubic-bezier(.2,.7,.2,1) var(--d,0s) forwards}
