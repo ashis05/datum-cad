@@ -6,10 +6,16 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Schema } from "@google/genai";
-import { SYSTEM_PROMPT } from "./systemPrompt.js";
+import type { CadResponse } from "../api";
+import { sanitizeCadResponse } from "./sanitize";
+import { SYSTEM_PROMPT } from "./systemPrompt";
 
-// Brief locks "Gemini 2.5 Flash-Lite". Overridable via env in case the id changes.
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const TIMEOUT_MS = 45_000;
+
+/** Brief locks "Gemini 2.5 Flash-Lite". Overridable via env; read per call (Next loads .env.local). */
+export function getModel(): string {
+  return process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+}
 
 // Response contract from prototype.md §5 — enforced via structured output so
 // parsing on the server is reliable.
@@ -48,32 +54,13 @@ export interface GenerateInput {
   previousError?: string;
 }
 
-export interface CadParam {
-  name: string;
-  label: string;
-  default: number;
-  min: number;
-  max: number;
-  step: number;
-}
-
-export interface CadResponse {
-  code: string;
-  params: CadParam[];
-  notes: string;
-}
-
-let client: GoogleGenAI | null = null;
+let client: { key: string; ai: GoogleGenAI } | null = null;
 
 function getClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY is not set. Add it to backend/.env.local (see backend/.env.example).",
-    );
-  }
-  if (!client) client = new GoogleGenAI({ apiKey });
-  return client;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set. Add it to .env.local (see .env.example).");
+  if (!client || client.key !== apiKey) client = { key: apiKey, ai: new GoogleGenAI({ apiKey }) };
+  return client.ai;
 }
 
 /** Build the user-turn content: prompt, plus current code on edits and the prior error on retries. */
@@ -96,9 +83,10 @@ export async function generateCad(input: GenerateInput): Promise<CadResponse> {
   const ai = getClient();
 
   const response = await ai.models.generateContent({
-    model: MODEL,
+    model: getModel(),
     contents: buildContents(input),
     config: {
+      abortSignal: AbortSignal.timeout(TIMEOUT_MS),
       systemInstruction: SYSTEM_PROMPT,
       temperature: 0.1,
       responseMimeType: "application/json",
@@ -107,26 +95,13 @@ export async function generateCad(input: GenerateInput): Promise<CadResponse> {
   });
 
   const text = response.text;
-  if (!text) {
-    throw new Error("Gemini returned an empty response.");
-  }
+  if (!text) throw new Error("Gemini returned an empty response.");
 
-  let parsed: CadResponse;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text) as CadResponse;
+    parsed = JSON.parse(text);
   } catch {
     throw new Error(`Gemini returned non-JSON output: ${text.slice(0, 500)}`);
   }
-
-  // Minimal contract validation — the browser runs this code, so fail loudly here.
-  if (typeof parsed.code !== "string" || !parsed.code.includes("buildModel")) {
-    throw new Error("Gemini response is missing a valid buildModel function in `code`.");
-  }
-  if (!Array.isArray(parsed.params)) {
-    throw new Error("Gemini response is missing a `params` array.");
-  }
-
-  return parsed;
+  return sanitizeCadResponse(parsed);
 }
-
-export { MODEL };

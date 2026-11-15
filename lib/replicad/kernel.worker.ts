@@ -18,6 +18,15 @@ import {
 // Holds the latest built solid so export() doesn't need to re-run the code.
 let currentShape: Shape3D | null = null;
 
+/** Release OCCT (WASM heap) memory; never let cleanup mask the real result. */
+function freeShape(shape: Shape3D): void {
+  try {
+    shape.delete();
+  } catch {
+    /* already deleted */
+  }
+}
+
 const api = {
   async init(): Promise<void> {
     await initKernel();
@@ -27,13 +36,22 @@ const api = {
   build(code: string, values: Record<string, number>): RawMesh {
     // Both calls throw decoded Error objects on failure; comlink propagates them.
     const shape = runGeneratedModel(code, values);
+    let mesh: RawMesh;
+    try {
+      mesh = meshRaw(shape);
+    } catch (err) {
+      freeShape(shape); // keep the previous (still valid) shape
+      throw err;
+    }
+    const previous = currentShape;
     currentShape = shape;
-    return meshRaw(shape);
+    if (previous) freeShape(previous);
+    return mesh;
   },
 
   /** Export the current solid as a STEP/STL Blob. */
   exportBlob(format: "step" | "stl"): Blob {
-    if (!currentShape) throw new Error("No model to export yet.");
+    if (!currentShape) throw new Error("Rebuild the model before exporting.");
     return exportShape(currentShape, format);
   },
 };

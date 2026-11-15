@@ -13,7 +13,7 @@
 import opencascade from "replicad-opencascadejs/src/replicad_single.js";
 import type { OpenCascadeInstance } from "replicad-opencascadejs/src/replicad_single.js";
 import * as replicad from "replicad";
-import { setOC, drawRectangle, drawCircle } from "replicad";
+import { setOC } from "replicad";
 import type { Shape3D } from "replicad";
 
 // Raw, structured-cloneable mesh data (plain arrays) — safe to pass from the
@@ -46,26 +46,6 @@ export function initKernel(): Promise<void> {
 }
 
 /**
- * Phase B hardcoded demo: a 40×20×10mm plate with a centered 5mm hole.
- * No LLM involved — this exists only to prove the kernel renders.
- */
-export function buildBoxWithHole(): Shape3D {
-  const length = 40;
-  const width = 20;
-  const thickness = 10;
-  const holeRadius = 2.5;
-
-  const plate = drawRectangle(length, width)
-    .sketchOnPlane()
-    .extrude(thickness) as Shape3D;
-  const hole = drawCircle(holeRadius)
-    .sketchOnPlane()
-    .extrude(thickness) as Shape3D;
-
-  return plate.cut(hole);
-}
-
-/**
  * Turn a thrown value from the kernel into a readable message.
  *
  * OpenCascade (via emscripten) throws native exceptions as raw NUMBERS (a
@@ -87,6 +67,13 @@ export function decodeKernelError(err: unknown): string {
   return String(err);
 }
 
+// Globals hidden from model-authored code so it can't make network calls or
+// message the page.
+const SHADOWED_GLOBALS = [
+  "fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts",
+  "indexedDB", "caches", "navigator", "location", "postMessage", "close",
+];
+
 /**
  * Evaluate LLM-generated `buildModel` code and run it with the given parameter
  * values, returning the resulting solid.
@@ -99,12 +86,13 @@ export function runGeneratedModel(
   code: string,
   values: Record<string, number>,
 ): Shape3D {
-  let factory: (r: typeof replicad, p: Record<string, number>) => Shape3D;
+  let factory: (r: typeof replicad, p: Record<string, number>, ...shadowed: undefined[]) => Shape3D;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    // Extra parameters shadow network/messaging globals; callers pass undefined.
     factory = new Function(
       "replicad",
       "params",
+      ...SHADOWED_GLOBALS,
       `${code}\nreturn buildModel(replicad, params);`,
     ) as typeof factory;
   } catch (err) {
@@ -113,7 +101,7 @@ export function runGeneratedModel(
 
   let shape: Shape3D;
   try {
-    shape = factory(replicad, values);
+    shape = factory(replicad, values, ...SHADOWED_GLOBALS.map(() => undefined));
   } catch (err) {
     throw new Error(decodeKernelError(err));
   }
