@@ -8,8 +8,8 @@ node_modules/
 
 # build output
 dist/
-frontend/.next/
-frontend/out/
+
+out/
 
 # logs
 *.log
@@ -20,3 +20,12 @@ npm-debug.log*
 
 # claude local (personal) settings
 .claude/settings.local.json
+.next/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+coverage/
+
+# editors / local agent state
+.idea/
+.claude/

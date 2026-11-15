@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(aws cloudwatch get-metric-statistics *)",
-      "mcp__figma__get_screenshot",
-      "mcp__figma__get_design_context"
-    ]
-  }
-}
