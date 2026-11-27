@@ -59,6 +59,7 @@ Without `DATABASE_URL` the app still runs: rate limits fall back to in-memory co
 | `DATABASE_URL` | for accounts | | Neon connection string (pooled). Users, history, rate-limit counters |
 | `AUTH_SECRET` | for accounts | | Session signing key: `npx auth secret` or `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | for Google sign-in | | OAuth client from Google Cloud Console |
+| `GEMINI_DAILY_LIMIT` | no | `20` | Requests per day your Gemini key allows (shared by all users; resets midnight Pacific). Set it to your key's real RPD |
 | `RATE_LIMIT_ANON_PER_MINUTE` / `_PER_DAY` | no | `3` / `10` | Signed-out limit, per IP |
 | `RATE_LIMIT_USER_PER_MINUTE` / `_PER_DAY` | no | `10` / `100` | Signed-in limit, per user |
 | `RATE_LIMIT_PRO_PER_MINUTE` / `_PER_DAY` | no | `30` / `500` | Limit for users with `tier = 'pro'` |
@@ -116,7 +117,7 @@ docs/                     original spec, build log, README image tooling
 
 ## Limits worth knowing
 
-- **Free-tier quota.** Gemini's free tier allows about 20 generations a day for Flash-Lite. Slider changes are free; each self-correction retry costs one generation.
+- **One key, shared quota.** Every user draws on the server's single Gemini key, whose free tier allows about 20 generations a day for Flash-Lite. `GEMINI_DAILY_LIMIT` tracks that budget, and the meter shows "tries left": the smaller of your own allowance and what's left for everyone. If Gemini reports the daily quota spent, the budget is marked used up until midnight Pacific. Slider changes are free; each self-correction retry costs one try.
 - **Rate limits live in Postgres.** Counters are shared by every server instance, keyed by user id when signed in and by IP otherwise. Every Gemini call counts, including self-correction retries. If the database is unreachable, a request falls back to that instance's in-memory counter rather than failing.
 - **Generated code runs in your browser.** It runs inside the Web Worker with network and messaging globals hidden from it and a 20-second build timeout, but it is still model-written JavaScript.
 - **Simple and medium parts work best.** One to a few features (plates, brackets, flanges, standoffs, trays) build reliably. Dense parts with many interacting fillets may need a follow-up prompt.

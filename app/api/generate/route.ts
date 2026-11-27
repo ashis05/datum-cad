@@ -1,7 +1,13 @@
-import type { ApiErrorBody, UsageWindow } from "@/lib/api";
+import type { ApiErrorBody, Quota } from "@/lib/api";
 import { generateCad } from "@/lib/server/gemini";
 import { resolveIdentity } from "@/lib/server/identity";
-import { checkRateLimit } from "@/lib/server/rateLimit";
+import {
+  checkRateLimit,
+  checkSharedBudget,
+  effectiveQuota,
+  markSharedExhausted,
+  peekSharedBudget,
+} from "@/lib/server/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -27,20 +33,26 @@ function isQuota(err: unknown): boolean {
   return e?.status === 429 || e?.code === 429 || /RESOURCE_EXHAUSTED|\b429\b/.test(msg);
 }
 
-function rateHeaders(day: UsageWindow): Record<string, string> {
+function rateHeaders(q: Quota): Record<string, string> {
   return {
-    "X-RateLimit-Limit": String(day.limit),
-    "X-RateLimit-Remaining": String(day.remaining),
-    "X-RateLimit-Reset": String(Math.ceil(day.resetAt / 1000)),
+    "X-RateLimit-Limit": String(q.limit),
+    "X-RateLimit-Remaining": String(q.remaining),
+    "X-RateLimit-Reset": String(Math.ceil(q.resetAt / 1000)),
+    "X-RateLimit-Scope": q.scope,
   };
 }
+
+const SHARED_SPENT = "Today's AI capacity is used up for everyone. It resets at midnight Pacific time.";
 
 export async function POST(req: Request) {
   const identity = await resolveIdentity(req);
   if (identity.disabled) return fail(403, { error: "This account has been disabled.", code: "FORBIDDEN" });
 
-  const limit = await checkRateLimit(identity.key, identity.tier);
-  const rl = rateHeaders(limit.day);
+  // The caller's own limit is checked (and counted) first. The shared Gemini
+  // budget is only peeked here and charged right before the model call, so
+  // blocked or invalid requests never spend everyone's quota.
+  const [limit, sharedNow] = await Promise.all([checkRateLimit(identity.key, identity.tier), peekSharedBudget()]);
+  let rl = rateHeaders(effectiveQuota(limit.day, sharedNow));
   const failRl = (status: number, body: ApiErrorBody, headers?: Record<string, string>) =>
     fail(status, body, { ...rl, ...headers });
   const bad = (error: string) => failRl(400, { error, code: "BAD_REQUEST" });
@@ -87,6 +99,16 @@ export async function POST(req: Request) {
     return failRl(503, { error: "The server has no GEMINI_API_KEY configured.", code: "NO_KEY" });
   }
 
+  const shared = await checkSharedBudget();
+  rl = rateHeaders(effectiveQuota(limit.day, shared.window));
+  if (!shared.ok) {
+    return failRl(
+      429,
+      { error: SHARED_SPENT, code: "QUOTA", retryAfter: shared.retryAfter },
+      { "Retry-After": String(shared.retryAfter) },
+    );
+  }
+
   try {
     const result = await generateCad({
       prompt: prompt.trim(),
@@ -98,10 +120,17 @@ export async function POST(req: Request) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[api/generate] Gemini call failed:", msg.slice(0, 1000));
     if (isQuota(err)) {
+      // Google's per-minute limits also answer 429 with a short retryDelay;
+      // only a long (or missing) delay means the daily quota is gone.
+      const delay = retryDelay(msg);
+      if (delay === undefined || delay > 120) {
+        rl = rateHeaders(effectiveQuota(limit.day, await markSharedExhausted()));
+        return failRl(429, { error: SHARED_SPENT, code: "QUOTA", retryAfter: delay });
+      }
       return failRl(429, {
-        error: "The AI model's quota is used up for now. Try again later.",
+        error: "The AI model is busy right now. Try again in a moment.",
         code: "QUOTA",
-        retryAfter: retryDelay(msg),
+        retryAfter: delay,
       });
     }
     return failRl(502, { error: "The AI model couldn't produce a usable result. Please try again.", code: "UPSTREAM" });

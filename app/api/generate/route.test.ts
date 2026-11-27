@@ -9,6 +9,7 @@ const currentUserId = vi.fn();
 vi.mock("../../../auth", () => ({ currentUserId: () => currentUserId() }));
 
 import { generateCad } from "../../../lib/server/gemini";
+import { peekSharedBudget } from "../../../lib/server/rateLimit";
 import { POST } from "./route";
 
 const mocked = vi.mocked(generateCad);
@@ -29,12 +30,15 @@ const savedKey = process.env.GEMINI_API_KEY;
 
 beforeEach(() => {
   process.env.GEMINI_API_KEY = "test-key";
+  // The shared Gemini budget is process-wide; keep it out of the way unless a test sets it.
+  process.env.GEMINI_DAILY_LIMIT = "100000";
   mocked.mockReset();
   delete process.env.DATABASE_URL;
   currentUserId.mockReset().mockResolvedValue(null);
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
+  delete process.env.GEMINI_DAILY_LIMIT;
   if (savedKey === undefined) delete process.env.GEMINI_API_KEY;
   else process.env.GEMINI_API_KEY = savedKey;
   vi.restoreAllMocks();
@@ -166,5 +170,59 @@ describe("POST /api/generate", () => {
     expect(res.status).toBe(403);
     expect((await res.json()).code).toBe("FORBIDDEN");
     vi.doUnmock("../../../lib/server/identity");
+  });
+
+  describe("shared Gemini budget", () => {
+    it("invalid and user-blocked requests don't spend it", async () => {
+      const before = (await peekSharedBudget()).remaining;
+      await call({ prompt: "" });
+      const ip = "7.7.7.7";
+      for (let i = 0; i < 5; i++) await call({ prompt: "" }, ip);
+      expect((await peekSharedBudget()).remaining).toBe(before);
+    });
+
+    it("a successful call spends one", async () => {
+      mocked.mockResolvedValue(ok);
+      const before = (await peekSharedBudget()).remaining;
+      expect((await call({ prompt: "box" })).status).toBe(200);
+      expect((await peekSharedBudget()).remaining).toBe(before - 1);
+    });
+
+    it("when spent: 429 QUOTA without calling Gemini, headers scoped to shared", async () => {
+      process.env.GEMINI_DAILY_LIMIT = "1"; // earlier successful calls already used more than 1
+      const res = await call({ prompt: "box" });
+      expect(res.status).toBe(429);
+      expect(mocked).not.toHaveBeenCalled();
+      const j = await res.json();
+      expect(j.code).toBe("QUOTA");
+      expect(j.retryAfter).toBeGreaterThan(0);
+      expect(res.headers.get("X-RateLimit-Scope")).toBe("shared");
+      expect(res.headers.get("X-RateLimit-Limit")).toBe("1");
+      expect(res.headers.get("X-RateLimit-Remaining")).toBe("0");
+    });
+
+    it("the binding limit wins: shared when it has less left than the user", async () => {
+      mocked.mockResolvedValue(ok);
+      const used = (await peekSharedBudget()).limit - (await peekSharedBudget()).remaining;
+      process.env.GEMINI_DAILY_LIMIT = String(used + 3); // 3 left for everyone, anon user has 10
+      const res = await call({ prompt: "box" });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-RateLimit-Scope")).toBe("shared");
+      expect(res.headers.get("X-RateLimit-Remaining")).toBe("2");
+    });
+
+    it("a daily-quota 429 from Gemini marks the budget spent; a per-minute 429 doesn't", async () => {
+      mocked.mockRejectedValueOnce(Object.assign(new Error('{"retryDelay":"20s"}'), { status: 429 }));
+      const busy = await call({ prompt: "box" });
+      expect(busy.status).toBe(429);
+      expect((await peekSharedBudget()).remaining).toBeGreaterThan(0);
+
+      mocked.mockRejectedValueOnce(Object.assign(new Error("RESOURCE_EXHAUSTED: daily limit"), { status: 429 }));
+      const spent = await call({ prompt: "box" });
+      expect(spent.status).toBe(429);
+      expect((await spent.json()).code).toBe("QUOTA");
+      expect(spent.headers.get("X-RateLimit-Remaining")).toBe("0");
+      expect((await peekSharedBudget()).remaining).toBe(0);
+    });
   });
 });

@@ -39,7 +39,7 @@ export type ApiErrorCode =
   | "UNAUTHORIZED" // 401: endpoint needs a signed-in user (history)
   | "FORBIDDEN" // 403: account disabled
   | "NOT_FOUND" // 404: conversation doesn't exist or isn't yours
-  | "QUOTA" // 429: the Gemini key itself is out of quota
+  | "QUOTA" // 429: the shared Gemini key is out of quota for today
   | "NO_KEY" // 503: server has no GEMINI_API_KEY configured
   | "UPSTREAM" // 502: Gemini failed or returned unusable output
   | "NETWORK"; // fetch itself failed (offline, server down)
@@ -72,25 +72,37 @@ export interface UsageWindow {
   resetAt: number; // ms epoch when this window resets
 }
 
+/**
+ * Generations the caller can actually make right now: the smaller of their own
+ * daily allowance (`scope: "user"`) and what's left of the server's shared
+ * Gemini key quota for the day (`scope: "shared"`), which every user draws on.
+ */
+export interface Quota extends UsageWindow {
+  scope: "user" | "shared";
+}
+
 /** GET /api/usage. Reading it does NOT consume quota. */
 export interface Usage {
   tier: UsageTier;
   signedIn: boolean;
-  minute: UsageWindow;
-  day: UsageWindow;
+  minute: UsageWindow; // the caller's own per-minute window
+  day: UsageWindow; // the caller's own daily allowance
+  shared: UsageWindow; // the shared Gemini key's daily budget (resets midnight Pacific)
+  quota: Quota; // what to show: min(day, shared)
 }
 
 /**
- * Every /api/generate response (success or 429) carries the DAY window as
- * X-RateLimit-Limit / X-RateLimit-Remaining / X-RateLimit-Reset (reset = unix
- * seconds). Returns null if the headers are missing.
+ * Every /api/generate response from the limiter onward carries the effective
+ * quota as X-RateLimit-Limit / -Remaining / -Reset (reset = unix seconds) and
+ * X-RateLimit-Scope ("user" | "shared"). Returns null if the headers are missing.
  */
-export function usageFromHeaders(headers: Headers): UsageWindow | null {
+export function usageFromHeaders(headers: Headers): Quota | null {
   const limit = Number(headers.get("X-RateLimit-Limit"));
   const remaining = Number(headers.get("X-RateLimit-Remaining"));
   const reset = Number(headers.get("X-RateLimit-Reset"));
   if (!headers.has("X-RateLimit-Limit") || ![limit, remaining, reset].every(Number.isFinite)) return null;
-  return { limit, remaining, resetAt: reset * 1000 };
+  const scope = headers.get("X-RateLimit-Scope") === "shared" ? "shared" : "user";
+  return { limit, remaining, resetAt: reset * 1000, scope };
 }
 
 export async function getUsage(): Promise<Usage> {
@@ -156,8 +168,8 @@ export const appendMessage = (conversationId: string, msg: NewMessage) =>
 // ── Generate ───────────────────────────────────────────────────────────────
 
 /** Called after every /api/generate response that carried rate-limit headers. */
-let usageListener: ((w: UsageWindow) => void) | null = null;
-export function onGenerateUsage(fn: ((w: UsageWindow) => void) | null) {
+let usageListener: ((q: Quota) => void) | null = null;
+export function onGenerateUsage(fn: ((q: Quota) => void) | null) {
   usageListener = fn;
 }
 
