@@ -4,7 +4,7 @@
 // desktop = conversation | viewport | parameters, mobile = viewport on top with
 // a Conversation / Parameters segmented control below it.
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import Viewport, { type ViewCommand } from "./Viewport";
 import TopBar from "./TopBar";
@@ -13,6 +13,9 @@ import ParamPanel from "./ParamPanel";
 import { ExportButtons, ViewTools, type ViewName } from "./ViewportToolbar";
 import { useCadSession } from "./useCadSession";
 import { boundingSize } from "@/lib/ui/bbox";
+import HistoryDrawer from "./HistoryDrawer";
+import { useUsage } from "./useUsage";
+import { getConversation } from "@/lib/api";
 
 type Tab = "conversation" | "params";
 
@@ -21,6 +24,17 @@ export default function CadStage() {
   const [tab, setTab] = useState<Tab>("conversation");
   const [edges, setEdges] = useState(true);
   const [command, setCommand] = useState<ViewCommand | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const { day, tier } = useUsage();
+  const closeHistory = useCallback(() => setHistoryOpen(false), []);
+
+  // Throws on failure so the drawer can show the error inline.
+  async function openConversation(id: string) {
+    const detail = await getConversation(id);
+    setHistoryOpen(false);
+    setTab("conversation");
+    await s.load(detail);
+  }
 
   const size = useMemo(() => boundingSize(s.geometries), [s.geometries]);
 
@@ -28,7 +42,7 @@ export default function CadStage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TopBar status={s.kernel.status} />
+      <TopBar status={s.kernel.status} tier={tier} onOpenHistory={() => setHistoryOpen(true)} />
 
       {s.kernel.status === "error" && (
         <div className="border-b border-danger/30 bg-danger/10 px-4 py-2 text-[13px] text-text" role="alert">
@@ -127,6 +141,9 @@ export default function CadStage() {
               activeId={s.activeId}
               onSubmit={s.submit}
               onRestore={s.restore}
+              usage={day}
+              persistNotice={s.persistNotice}
+              onDismissPersistNotice={s.dismissPersistNotice}
             />
           </aside>
 
@@ -146,6 +163,23 @@ export default function CadStage() {
           </aside>
         </div>
       </div>
+
+      <HistoryDrawer
+        open={historyOpen}
+        signedIn={s.signedIn}
+        activeId={s.conversationId}
+        busy={s.busy}
+        onClose={closeHistory}
+        onNew={() => {
+          s.reset();
+          setHistoryOpen(false);
+          setTab("conversation");
+        }}
+        onSelect={openConversation}
+        onDeleted={(id) => {
+          if (id === s.conversationId) s.reset();
+        }}
+      />
     </div>
   );
 }

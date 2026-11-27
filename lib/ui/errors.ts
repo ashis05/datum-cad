@@ -8,6 +8,12 @@ export function describeError(err: unknown): string {
         return err.retryAfter
           ? `You're sending prompts quickly — try again in ${Math.ceil(err.retryAfter)}s.`
           : "You're sending prompts quickly — try again in a moment.";
+      case "AUTH_REQUIRED":
+        return "You've used today's free generations — sign in for more.";
+      case "FORBIDDEN":
+        return "This account can't use Datum right now.";
+      case "UNAUTHORIZED":
+        return "Please sign in to continue.";
       case "QUOTA":
         return "The AI quota is used up for now. Please try again later.";
       case "NO_KEY":
