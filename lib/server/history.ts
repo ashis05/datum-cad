@@ -15,6 +15,7 @@ import type {
 } from "@/lib/api";
 import { currentUserId } from "@/auth";
 import { getDb, hasDb, schema } from "./db";
+import { isDisabled } from "./identity";
 
 const { conversations, messages } = schema;
 
@@ -150,6 +151,9 @@ export async function requireUser(): Promise<{ userId: string } | { response: Re
   if (!userId) return { response: apiError(401, { error: "Sign in to use chat history.", code: "UNAUTHORIZED" }) };
   if (!hasDb()) {
     return { response: apiError(503, { error: "Chat history isn't configured on this server.", code: "UPSTREAM" }) };
+  }
+  if (await isDisabled(userId)) {
+    return { response: apiError(403, { error: "This account has been disabled.", code: "FORBIDDEN" }) };
   }
   return { userId };
 }

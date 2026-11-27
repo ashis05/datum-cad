@@ -19,6 +19,22 @@ export function clientIp(headers: Headers): string {
   return fwd || headers.get("x-real-ip")?.trim() || "local";
 }
 
+/** True when the user row is flagged disabled. A failed lookup reads as not disabled. */
+export async function isDisabled(userId: string): Promise<boolean> {
+  if (!hasDb()) return false;
+  try {
+    const [row] = await getDb()
+      .select({ disabled: schema.users.disabled })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return row?.disabled ?? false;
+  } catch (err) {
+    console.error("[identity] disabled lookup failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 export async function resolveIdentity(req: Request): Promise<Identity> {
   const userId = await currentUserId();
   if (!userId) return { key: `ip:${clientIp(req.headers)}`, tier: "anonymous", userId: null, disabled: false };
