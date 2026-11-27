@@ -62,7 +62,9 @@ Drawing methods:
 Sketch methods:
 - .extrude(height)                        // returns a 3D shape (extrudes along plane normal)
 Primitive solids:
-- makeBaseBox(xLength, yLength, zLength)   // box centered on XY, sitting from z=0 up
+- makeBaseBox(xLength, yLength, zLength)   // box centered on XY, sitting from z=0 up — USE THIS for a box/cube
+- makeBox(corner1, corner2)               // box between two [x,y,z] CORNER POINTS, e.g. makeBox([0,0,0],[20,20,20])
+    WRONG: makeBox(20, 20, 20)            // three numbers is NOT a size; the kernel aborts with a numeric error
 - makeCylinder(radius, height)            // cylinder from z=0 up along +Z
 - makeSphere(radius)
 3D shape (boolean / feature) methods — all return a new shape:

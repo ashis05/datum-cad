@@ -5,6 +5,9 @@ vi.mock("../../../lib/server/gemini", () => ({
   getModel: () => "test-model",
 }));
 
+const currentUserId = vi.fn();
+vi.mock("../../../auth", () => ({ currentUserId: () => currentUserId() }));
+
 import { generateCad } from "../../../lib/server/gemini";
 import { POST } from "./route";
 
@@ -27,6 +30,8 @@ const savedKey = process.env.GEMINI_API_KEY;
 beforeEach(() => {
   process.env.GEMINI_API_KEY = "test-key";
   mocked.mockReset();
+  delete process.env.DATABASE_URL;
+  currentUserId.mockReset().mockResolvedValue(null);
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -78,15 +83,88 @@ describe("POST /api/generate", () => {
     expect(mocked).toHaveBeenCalledWith({ prompt: "box", currentCode: "c", previousError: "e" });
   });
 
-  it("429 RATE_LIMITED after the per-minute limit", async () => {
+  it("429 RATE_LIMITED after the anonymous per-minute limit, with headers", async () => {
     mocked.mockResolvedValue(ok);
     const ip = "9.9.9.9";
-    for (let i = 0; i < 8; i++) expect((await call({ prompt: "box" }, ip)).status).toBe(200);
+    for (let i = 0; i < 3; i++) expect((await call({ prompt: "box" }, ip)).status).toBe(200);
     const res = await call({ prompt: "box" }, ip);
     expect(res.status).toBe(429);
     expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(0);
     const j = await res.json();
     expect(j.code).toBe("RATE_LIMITED");
     expect(j.retryAfter).toBeGreaterThan(0);
+  });
+
+  it("429 AUTH_REQUIRED when an anonymous caller exhausts the daily limit", async () => {
+    mocked.mockResolvedValue(ok);
+    process.env.RATE_LIMIT_ANON_PER_MINUTE = "100";
+    process.env.RATE_LIMIT_ANON_PER_DAY = "2";
+    try {
+      const ip = "9.9.9.10";
+      await call({ prompt: "box" }, ip);
+      await call({ prompt: "box" }, ip);
+      const res = await call({ prompt: "box" }, ip);
+      expect(res.status).toBe(429);
+      expect(res.headers.get("Retry-After")).not.toBeNull();
+      expect(res.headers.get("X-RateLimit-Remaining")).toBe("0");
+      const j = await res.json();
+      expect(j.code).toBe("AUTH_REQUIRED");
+      expect(j.retryAfter).toBeGreaterThan(0);
+    } finally {
+      delete process.env.RATE_LIMIT_ANON_PER_MINUTE;
+      delete process.env.RATE_LIMIT_ANON_PER_DAY;
+    }
+  });
+
+  it("signed-in users get higher limits and daily-exhaustion is RATE_LIMITED, not AUTH_REQUIRED", async () => {
+    mocked.mockResolvedValue(ok);
+    currentUserId.mockResolvedValue("user-a");
+    for (let i = 0; i < 10; i++) expect((await call({ prompt: "box" }, "9.9.9.11")).status).toBe(200);
+    expect((await call({ prompt: "box" }, "9.9.9.11")).status).toBe(429);
+
+    process.env.RATE_LIMIT_USER_PER_MINUTE = "100";
+    process.env.RATE_LIMIT_USER_PER_DAY = "1";
+    try {
+      currentUserId.mockResolvedValue("user-b");
+      await call({ prompt: "box" });
+      const res = await call({ prompt: "box" });
+      expect(res.status).toBe(429);
+      expect((await res.json()).code).toBe("RATE_LIMITED");
+    } finally {
+      delete process.env.RATE_LIMIT_USER_PER_MINUTE;
+      delete process.env.RATE_LIMIT_USER_PER_DAY;
+    }
+  });
+
+  it("sets X-RateLimit-* (day window, reset in unix seconds) on 200, 400 and 502", async () => {
+    mocked.mockResolvedValue(ok);
+    const ip = "9.9.9.12";
+    const res = await call({ prompt: "box" }, ip);
+    expect(res.headers.get("X-RateLimit-Limit")).toBe("10");
+    expect(res.headers.get("X-RateLimit-Remaining")).toBe("9");
+    const reset = Number(res.headers.get("X-RateLimit-Reset"));
+    expect(Math.abs(reset - (Date.now() / 1000 + 86_400))).toBeLessThan(5);
+
+    const bad = await call("not json", ip);
+    expect(bad.status).toBe(400);
+    expect(bad.headers.get("X-RateLimit-Remaining")).toBe("8");
+
+    mocked.mockRejectedValue(new Error("x"));
+    const up = await call({ prompt: "box" }, ip);
+    expect(up.status).toBe(502);
+    expect(up.headers.get("X-RateLimit-Limit")).toBe("10");
+  });
+
+  it("403 FORBIDDEN for disabled users, without calling the model", async () => {
+    // No DB in tests, so mock the identity lookup for this case.
+    vi.resetModules();
+    vi.doMock("../../../lib/server/identity", () => ({
+      resolveIdentity: async () => ({ key: "user:x", tier: "free", userId: "x", disabled: true }),
+    }));
+    const { POST: P } = await import("./route");
+    const res = await P(new Request("http://localhost/api/generate", { method: "POST", body: JSON.stringify({ prompt: "box" }) }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("FORBIDDEN");
+    vi.doUnmock("../../../lib/server/identity");
   });
 });

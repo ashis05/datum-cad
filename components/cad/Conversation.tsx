@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Check, CircleAlert, History, Loader2 } from "lucide-react";
+import { ArrowUp, Check, CircleAlert, History, Loader2, X } from "lucide-react";
+import { useSession } from "next-auth/react";
+import type { UsageWindow } from "@/lib/api";
+import QuotaMeter from "./QuotaMeter";
+import SignInButtons from "./SignInButtons";
 import ExamplePrompts from "./ExamplePrompts";
 import type { HistoryItem } from "./useCadSession";
 
@@ -13,6 +17,9 @@ interface Props {
   activeId: number | null;
   onSubmit: (prompt: string) => void;
   onRestore: (id: number) => void;
+  usage: UsageWindow | null;
+  persistNotice: string | null;
+  onDismissPersistNotice: () => void;
 }
 
 const MAX_TEXTAREA_PX = 8 * 20 + 16; // ~8 lines at 20px + padding
@@ -25,7 +32,11 @@ export default function Conversation({
   activeId,
   onSubmit,
   onRestore,
+  usage,
+  persistNotice,
+  onDismissPersistNotice,
 }: Props) {
+  const { status: authStatus } = useSession();
   const [draft, setDraft] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -101,7 +112,14 @@ export default function Conversation({
             {item.error && (
               <div className="flex gap-2.5 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5" role="alert">
                 <CircleAlert className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
-                <p className="break-words text-[13px] leading-5 text-text">{item.error}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="break-words text-[13px] leading-5 text-text">{item.error}</p>
+                  {item.errorCode === "AUTH_REQUIRED" && authStatus !== "authenticated" && (
+                    <div className="mt-2.5">
+                      <SignInButtons compact />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -119,6 +137,20 @@ export default function Conversation({
       </div>
 
       <div className="shrink-0 border-t border-line bg-panel p-3">
+        {persistNotice && (
+          <div className="mb-2 flex items-start gap-2 px-1 text-[11px] leading-4 text-text-3" role="status">
+            <span className="min-w-0 flex-1">{persistNotice}</span>
+            <button
+              type="button"
+              onClick={onDismissPersistNotice}
+              aria-label="Dismiss"
+              className="-mt-0.5 flex size-5 shrink-0 items-center justify-center rounded hover:text-text"
+            >
+              <X className="size-3" aria-hidden />
+            </button>
+          </div>
+        )}
+        <QuotaMeter day={usage} />
         <div className="flex items-end gap-2 rounded-xl border border-line-strong bg-bg p-1.5 transition-colors focus-within:border-accent/60">
           <label htmlFor="prompt" className="sr-only">
             Describe a part

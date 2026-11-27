@@ -1,6 +1,7 @@
-import type { ApiErrorBody } from "@/lib/api";
+import type { ApiErrorBody, UsageWindow } from "@/lib/api";
 import { generateCad } from "@/lib/server/gemini";
-import { clientIp, rateLimiter } from "@/lib/server/rateLimit";
+import { resolveIdentity } from "@/lib/server/identity";
+import { checkRateLimit } from "@/lib/server/rateLimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,8 +15,6 @@ function fail(status: number, body: ApiErrorBody, headers?: HeadersInit) {
   return Response.json(body, { status, headers });
 }
 
-const bad = (error: string) => fail(400, { error, code: "BAD_REQUEST" });
-
 /** Best-effort: pull a retry delay in seconds out of a Gemini error message. */
 function retryDelay(msg: string): number | undefined {
   const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(msg) ?? /retry in (\d+(?:\.\d+)?)s/i.exec(msg);
@@ -28,13 +27,41 @@ function isQuota(err: unknown): boolean {
   return e?.status === 429 || e?.code === 429 || /RESOURCE_EXHAUSTED|\b429\b/.test(msg);
 }
 
+function rateHeaders(day: UsageWindow): Record<string, string> {
+  return {
+    "X-RateLimit-Limit": String(day.limit),
+    "X-RateLimit-Remaining": String(day.remaining),
+    "X-RateLimit-Reset": String(Math.ceil(day.resetAt / 1000)),
+  };
+}
+
 export async function POST(req: Request) {
-  const limit = rateLimiter.check(clientIp(req.headers));
+  const identity = await resolveIdentity(req);
+  if (identity.disabled) return fail(403, { error: "This account has been disabled.", code: "FORBIDDEN" });
+
+  const limit = await checkRateLimit(identity.key, identity.tier);
+  const rl = rateHeaders(limit.day);
+  const failRl = (status: number, body: ApiErrorBody, headers?: Record<string, string>) =>
+    fail(status, body, { ...rl, ...headers });
+  const bad = (error: string) => failRl(400, { error, code: "BAD_REQUEST" });
+
   if (!limit.ok) {
-    return fail(
+    const headers = { "Retry-After": String(limit.retryAfter) };
+    if (identity.tier === "anonymous" && limit.dayExceeded) {
+      return failRl(
+        429,
+        {
+          error: "You've used today's free generations. Sign in for a higher daily limit.",
+          code: "AUTH_REQUIRED",
+          retryAfter: limit.retryAfter,
+        },
+        headers,
+      );
+    }
+    return failRl(
       429,
       { error: "Too many requests. Please wait a bit and try again.", code: "RATE_LIMITED", retryAfter: limit.retryAfter },
-      { "Retry-After": String(limit.retryAfter) },
+      headers,
     );
   }
 
@@ -57,7 +84,7 @@ export async function POST(req: Request) {
   }
 
   if (!process.env.GEMINI_API_KEY) {
-    return fail(503, { error: "The server has no GEMINI_API_KEY configured.", code: "NO_KEY" });
+    return failRl(503, { error: "The server has no GEMINI_API_KEY configured.", code: "NO_KEY" });
   }
 
   try {
@@ -66,17 +93,17 @@ export async function POST(req: Request) {
       currentCode: currentCode as string | undefined,
       previousError: previousError as string | undefined,
     });
-    return Response.json(result);
+    return Response.json(result, { headers: rl });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[api/generate] Gemini call failed:", msg.slice(0, 1000));
     if (isQuota(err)) {
-      return fail(429, {
+      return failRl(429, {
         error: "The AI model's quota is used up for now. Try again later.",
         code: "QUOTA",
         retryAfter: retryDelay(msg),
       });
     }
-    return fail(502, { error: "The AI model couldn't produce a usable result. Please try again.", code: "UPSTREAM" });
+    return failRl(502, { error: "The AI model couldn't produce a usable result. Please try again.", code: "UPSTREAM" });
   }
 }

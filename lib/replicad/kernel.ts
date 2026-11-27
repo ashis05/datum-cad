@@ -59,9 +59,12 @@ export function decodeKernelError(err: unknown): string {
   if (typeof err === "number") {
     return (
       `The CAD kernel rejected this geometry (OpenCascade error #${err}). ` +
-      `Common causes: a fillet/chamfer radius too large for an edge, rounding ` +
-      `edges that can't be rounded (e.g. around holes), or an invalid boolean. ` +
-      `Try a smaller radius, or apply the fillet only to specific edges.`
+      `Common causes: a replicad function called with the wrong argument types ` +
+      `(e.g. makeBox takes two [x,y,z] corner points, not three sizes — use ` +
+      `makeBaseBox(x, y, z) for a box from dimensions), a fillet/chamfer radius ` +
+      `too large for an edge, rounding edges that can't be rounded (e.g. around ` +
+      `holes), or an invalid boolean. Check every call against the API, then ` +
+      `try a smaller radius or apply the fillet only to specific edges.`
     );
   }
   return String(err);
@@ -73,6 +76,20 @@ const SHADOWED_GLOBALS = [
   "fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts",
   "indexedDB", "caches", "navigator", "location", "postMessage", "close",
 ];
+
+/**
+ * The replicad namespace handed to generated code, with forgiving shims for
+ * calls models reliably get wrong. Other CAD libraries take box SIZES, so
+ * models write makeBox(20, 20, 20); replicad's makeBox takes two corner points
+ * and OCCT aborts with a bare numeric error. Three numbers → makeBaseBox.
+ */
+const modelLib: typeof replicad = {
+  ...replicad,
+  makeBox: ((...args: unknown[]) =>
+    args.length === 3 && args.every((a) => typeof a === "number")
+      ? replicad.makeBaseBox(args[0] as number, args[1] as number, args[2] as number)
+      : replicad.makeBox(args[0] as replicad.Point, args[1] as replicad.Point)) as typeof replicad.makeBox,
+};
 
 /**
  * Evaluate LLM-generated `buildModel` code and run it with the given parameter
@@ -101,7 +118,7 @@ export function runGeneratedModel(
 
   let shape: Shape3D;
   try {
-    shape = factory(replicad, values, ...SHADOWED_GLOBALS.map(() => undefined));
+    shape = factory(modelLib, values, ...SHADOWED_GLOBALS.map(() => undefined));
   } catch (err) {
     throw new Error(decodeKernelError(err));
   }

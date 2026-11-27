@@ -6,29 +6,41 @@
 import { useEffect, useRef, useState } from "react";
 import type { ThreeGeometry } from "replicad-threejs-helper";
 import { initKernel, runAndMesh, exportShape } from "@/lib/replicad/kernelClient";
-import { generateCad, type CadParam, type CadResponse } from "@/lib/api";
+import { useSession } from "next-auth/react";
+import {
+  ApiError,
+  appendMessage,
+  createConversation,
+  generateCad,
+  type CadParam,
+  type CadResponse,
+  type ConversationDetail,
+  type NewMessage,
+  type Snapshot,
+} from "@/lib/api";
 import { downloadBlob, slugify } from "@/lib/download";
 import { generateAndBuildWithRetry } from "@/lib/selfCorrect";
 import { describeError } from "@/lib/ui/errors";
 import type { KernelStatus } from "./TopBar";
 
-export interface Snapshot {
-  code: string;
-  params: CadParam[];
-  values: Record<string, number>;
-  designPrompt: string; // first prompt of this design — names the export files
-}
+export type { Snapshot };
 
 export interface HistoryItem {
   id: number;
+  remoteId?: string; // stored message id (signed-in history)
   prompt: string;
   notes?: string;
   error?: string;
+  errorCode?: string; // ApiError code, so the UI can offer a fix (e.g. sign in)
   corrected?: boolean; // built only after one or more self-correction retries
   snapshot?: Snapshot;
 }
 
+const TITLE_MAX = 60;
+
 export function useCadSession() {
+  const { data: authSession } = useSession();
+  const userId = authSession?.user?.id ?? null;
   const [kernel, setKernel] = useState<{ status: KernelStatus; error: string | null }>({
     status: "loading",
     error: null,
@@ -48,7 +60,18 @@ export function useCadSession() {
   const [paramError, setParamError] = useState<string | null>(null);
   const [retryStatus, setRetryStatus] = useState<string | null>(null);
 
+  const [convState, setConvState] = useState<{ uid: string | null; id: string | null }>({ uid: null, id: null });
+  const conversationId = convState.uid === userId ? convState.id : null; // other account => none
+  const setConversationId = (id: string | null) => setConvState({ uid: userRef.current, id });
+  const [persistNotice, setPersistNotice] = useState<string | null>(null);
+
   const nextId = useRef(1);
+  // Persistence: one object per chat so a reset/load never mixes conversations.
+  // Writes are chained so messages are stored in order.
+  const userRef = useRef(userId);
+  const chat = useRef<{ id: string | null }>({ id: null });
+  const persistChain = useRef<Promise<void>>(Promise.resolve());
+  const persistWarned = useRef(false);
   // Bumped whenever a different model becomes current, so a stale slider build
   // loop can't overwrite it.
   const modelGen = useRef(0);
@@ -59,6 +82,12 @@ export function useCadSession() {
     inFlight: boolean;
     pending: Record<string, number> | null;
   }>({ inFlight: false, pending: null });
+
+  // A different account (or signing out) must never write into the old chat.
+  useEffect(() => {
+    userRef.current = userId;
+    chat.current = { id: null };
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +128,26 @@ export function useCadSession() {
     setFitToken((n) => n + 1);
   }
 
+  function persist(title: string, msg: NewMessage) {
+    if (!userRef.current) return; // anonymous stays in memory
+    const target = chat.current;
+    persistChain.current = persistChain.current.then(async () => {
+      try {
+        if (!target.id) {
+          const c = await createConversation(title.slice(0, TITLE_MAX).trim());
+          target.id = c.id;
+          if (chat.current === target) setConversationId(c.id);
+        }
+        await appendMessage(target.id, msg);
+      } catch {
+        if (!persistWarned.current) {
+          persistWarned.current = true;
+          setPersistNotice("Couldn't save this chat to your history. Your design is unaffected.");
+        }
+      }
+    });
+  }
+
   async function submit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || busy || kernel.status !== "ready") return;
@@ -106,6 +155,7 @@ export function useCadSession() {
     setBusy(true);
     setRetryStatus(null);
     const id = nextId.current++;
+    const chatTitle = history[0]?.prompt ?? trimmed;
     setHistory((h) => [...h, { id, prompt: trimmed }]);
 
     // Build closure: run the generated code in the worker and mesh it. Throwing
@@ -141,9 +191,21 @@ export function useCadSession() {
             : item,
         ),
       );
+      persist(chatTitle, {
+        prompt: trimmed,
+        notes: result.notes,
+        corrected: attempts > 1,
+        snapshot: snap,
+      });
     } catch (err) {
       const message = describeError(err);
-      setHistory((h) => h.map((item) => (item.id === id ? { ...item, error: message } : item)));
+      const errorCode = err instanceof ApiError ? err.code : undefined;
+      setHistory((h) =>
+        h.map((item) => (item.id === id ? { ...item, error: message, errorCode } : item)),
+      );
+      // Only save build failures. API errors (rate limit, quota, network) never
+      // reached the model, so they're not part of the design's history.
+      if (!(err instanceof ApiError)) persist(chatTitle, { prompt: trimmed, error: message });
     } finally {
       setBusy(false);
       setRetryStatus(null);
@@ -158,6 +220,59 @@ export function useCadSession() {
     try {
       const geos = await runAndMesh(snap.code, snap.values);
       adopt(snap, geos, id);
+    } catch (err) {
+      setNotice(`Couldn't restore that version: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+      setRetryStatus(null);
+    }
+  }
+
+  /** Clear the whole session; the next prompt starts a new conversation. */
+  function reset() {
+    if (busy) return;
+    modelGen.current++;
+    paramBuildRef.current.pending = null;
+    chat.current = { id: null };
+    setConversationId(null);
+    setHistory([]);
+    setCode(null);
+    setParams([]);
+    setValues({});
+    setDesignPrompt(null);
+    setActiveId(null);
+    setNotice(null);
+    setParamError(null);
+    setPersistNotice(null);
+    swapGeometries([]);
+  }
+
+  /** Open a stored conversation: restore its last built model, append to it from here. */
+  async function load(detail: ConversationDetail) {
+    if (busy) return;
+    const items: HistoryItem[] = detail.messages.map((m) => ({
+      id: nextId.current++,
+      remoteId: m.id,
+      prompt: m.prompt,
+      notes: m.notes ?? undefined,
+      error: m.error ?? undefined,
+      corrected: m.corrected || undefined,
+      snapshot: m.snapshot ?? undefined,
+    }));
+    const last = [...items].reverse().find((i) => i.snapshot);
+
+    reset();
+    chat.current = { id: detail.id };
+    setConversationId(detail.id);
+    setHistory(items);
+    if (!last?.snapshot) return;
+
+    const snap = last.snapshot;
+    setBusy(true);
+    setRetryStatus("Restoring version…");
+    try {
+      const geos = await runAndMesh(snap.code, snap.values);
+      adopt(snap, geos, last.id);
     } catch (err) {
       setNotice(`Couldn't restore that version: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -230,10 +345,16 @@ export function useCadSession() {
     activeId,
     fitToken,
     notice,
+    persistNotice,
+    conversationId,
+    signedIn: !!userId,
     paramError,
     hasModel: geometries.length > 0,
     dismissNotice: () => setNotice(null),
+    dismissPersistNotice: () => setPersistNotice(null),
     submit,
+    reset,
+    load,
     restore,
     exportAs,
     changeParam,
