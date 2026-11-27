@@ -25,7 +25,7 @@ export default function CadStage() {
   const [edges, setEdges] = useState(true);
   const [command, setCommand] = useState<ViewCommand | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const { day, tier } = useUsage();
+  const { quota, tier } = useUsage();
   const closeHistory = useCallback(() => setHistoryOpen(false), []);
 
   // Throws on failure so the drawer can show the error inline.
@@ -141,7 +141,7 @@ export default function CadStage() {
               activeId={s.activeId}
               onSubmit={s.submit}
               onRestore={s.restore}
-              usage={day}
+              usage={quota}
               persistNotice={s.persistNotice}
               onDismissPersistNotice={s.dismissPersistNotice}
             />

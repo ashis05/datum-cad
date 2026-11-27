@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, Check, CircleAlert, History, Loader2, X } from "lucide-react";
 import { useSession } from "next-auth/react";
-import type { UsageWindow } from "@/lib/api";
+import type { Quota } from "@/lib/api";
 import QuotaMeter from "./QuotaMeter";
 import SignInButtons from "./SignInButtons";
 import ExamplePrompts from "./ExamplePrompts";
@@ -17,7 +17,7 @@ interface Props {
   activeId: number | null;
   onSubmit: (prompt: string) => void;
   onRestore: (id: number) => void;
-  usage: UsageWindow | null;
+  usage: Quota | null;
   persistNotice: string | null;
   onDismissPersistNotice: () => void;
 }
@@ -150,7 +150,7 @@ export default function Conversation({
             </button>
           </div>
         )}
-        <QuotaMeter day={usage} />
+        <QuotaMeter quota={usage} />
         <div className="flex items-end gap-2 rounded-xl border border-line-strong bg-bg p-1.5 transition-colors focus-within:border-accent/60">
           <label htmlFor="prompt" className="sr-only">
             Describe a part

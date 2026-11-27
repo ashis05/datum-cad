@@ -15,7 +15,8 @@ export function describeError(err: unknown): string {
       case "UNAUTHORIZED":
         return "Please sign in to continue.";
       case "QUOTA":
-        return "The AI quota is used up for now. Please try again later.";
+        // The server says whether it's a short busy spell or today's shared quota.
+        return err.message || "The AI quota is used up for now. Please try again later.";
       case "NO_KEY":
         return "The server isn't configured with an AI key yet, so it can't generate parts.";
       case "NETWORK":

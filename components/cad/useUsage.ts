@@ -1,16 +1,17 @@
 "use client";
 
-// Daily quota for the meter + tier for the account menu. Reading usage does not
+// Tries left for the meter (the smaller of the caller's own allowance and the
+// shared Gemini budget) + tier for the account menu. Reading usage does not
 // consume quota. Any failure just hides the meter.
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { getUsage, onGenerateUsage, type UsageTier, type UsageWindow } from "@/lib/api";
+import { getUsage, onGenerateUsage, type Quota, type UsageTier } from "@/lib/api";
 
 export function useUsage() {
   const { data, status } = useSession();
   const userId = data?.user?.id ?? null;
-  const [day, setDay] = useState<UsageWindow | null>(null);
+  const [quota, setQuota] = useState<Quota | null>(null);
   const [tier, setTier] = useState<UsageTier | null>(null);
 
   useEffect(() => {
@@ -19,12 +20,12 @@ export function useUsage() {
     getUsage()
       .then((u) => {
         if (cancelled) return;
-        setDay(u.day);
+        setQuota(u.quota);
         setTier(u.tier);
       })
       .catch(() => {
         if (cancelled) return;
-        setDay(null);
+        setQuota(null);
         setTier(null);
       });
     return () => {
@@ -33,9 +34,9 @@ export function useUsage() {
   }, [status, userId]);
 
   useEffect(() => {
-    onGenerateUsage(setDay);
+    onGenerateUsage(setQuota);
     return () => onGenerateUsage(null);
   }, []);
 
-  return { day, tier };
+  return { quota, tier };
 }
