@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 
+/** GitHub logo, used for the source-code link in the top bar. */
 export function GithubMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
@@ -18,7 +19,7 @@ function GoogleMark({ className }: { className?: string }) {
   );
 }
 
-/** Continue-with buttons. `compact` renders a tighter row for inline use. */
+/** Google sign-in button. `compact` renders a tighter row for inline use. */
 export default function SignInButtons({ compact = false }: { compact?: boolean }) {
   const cls = `flex items-center justify-center gap-2 rounded-lg border border-line-strong bg-bg text-[13px] text-text transition-colors hover:border-accent/50 hover:text-accent ${
     compact ? "h-10 flex-1 px-3 lg:h-8" : "h-10 w-full px-3"
@@ -26,10 +27,7 @@ export default function SignInButtons({ compact = false }: { compact?: boolean }
   return (
     <div className={compact ? "flex flex-wrap gap-2" : "flex flex-col gap-2"}>
       <button type="button" className={cls} onClick={() => void signIn("google")}>
-        <GoogleMark className="size-4" /> {compact ? "Google" : "Continue with Google"}
-      </button>
-      <button type="button" className={cls} onClick={() => void signIn("github")}>
-        <GithubMark className="size-4" /> {compact ? "GitHub" : "Continue with GitHub"}
+        <GoogleMark className="size-4" /> {compact ? "Sign in with Google" : "Continue with Google"}
       </button>
     </div>
   );

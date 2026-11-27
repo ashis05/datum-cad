@@ -37,7 +37,7 @@ prompt ──▶ /api/generate ──▶ Gemini 2.5 Flash-Lite ──▶ { code,
 - **Sliders never call the AI.** Every dimension the model declares becomes a parameter, and dragging one re-runs the same code in the worker.
 - **Broken code fixes itself.** If the kernel rejects the generated code, the decoded error and the code go back to the model, up to two retries.
 - **The key never reaches the browser.** The Gemini key lives in the server route only.
-- **Accounts are optional.** Anyone can try it with a small per-IP allowance. Signing in with Google or GitHub raises the limit and saves every design conversation to your history, so you can reopen a part later and keep editing it.
+- **Accounts are optional.** Anyone can try it with a small per-IP allowance. Signing in with Google raises the limit and saves every design conversation to your history, so you can reopen a part later and keep editing it.
 
 ## Run it locally
 
@@ -59,13 +59,12 @@ Without `DATABASE_URL` the app still runs: rate limits fall back to in-memory co
 | `DATABASE_URL` | for accounts | | Neon connection string (pooled). Users, history, rate-limit counters |
 | `AUTH_SECRET` | for accounts | | Session signing key: `npx auth secret` or `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | for Google sign-in | | OAuth client from Google Cloud Console |
-| `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET` | for GitHub sign-in | | OAuth app from GitHub developer settings |
 | `RATE_LIMIT_ANON_PER_MINUTE` / `_PER_DAY` | no | `3` / `10` | Signed-out limit, per IP |
 | `RATE_LIMIT_USER_PER_MINUTE` / `_PER_DAY` | no | `10` / `100` | Signed-in limit, per user |
 | `RATE_LIMIT_PRO_PER_MINUTE` / `_PER_DAY` | no | `30` / `500` | Limit for users with `tier = 'pro'` |
 | `NEXT_PUBLIC_SITE_URL` | no | `http://localhost:3000` | Absolute URL used for Open Graph images |
 
-OAuth callback URLs: `<site>/api/auth/callback/google` and `<site>/api/auth/callback/github`.
+OAuth redirect URI: `<site>/api/auth/callback/google`.
 
 To give someone the higher limit: `update "user" set tier = 'pro' where email = '…';` To block an account: `set disabled = true`.
 
@@ -74,7 +73,7 @@ To give someone the higher limit: `update "user" set tier = 'pro' where email = 
 It's a plain Next.js app at the repo root, so no config file is needed:
 
 1. Import the repo in Vercel (framework preset: Next.js).
-2. Add `GEMINI_API_KEY`, `NEXT_PUBLIC_SITE_URL` (for this deployment, `https://datum.ashiswadhwani.in`), `DATABASE_URL`, `AUTH_SECRET` and the four `AUTH_GOOGLE_*` / `AUTH_GITHUB_*` values under Environment Variables. The Neon integration in the Vercel marketplace can set `DATABASE_URL` for you.
+2. Add `GEMINI_API_KEY`, `NEXT_PUBLIC_SITE_URL` (for this deployment, `https://datum.ashiswadhwani.in`), `DATABASE_URL`, `AUTH_SECRET` `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` under Environment Variables. The Neon integration in the Vercel marketplace can set `DATABASE_URL` for you.
 3. Run `npm run db:migrate` once against the production database (and again whenever a new file appears in `drizzle/`).
 4. Deploy. Every push to `master` redeploys production.
 
@@ -93,7 +92,7 @@ The 10.8 MB OpenCascade WASM ships from `public/` as a static file; all CAD work
 ## Project layout
 
 ```
-auth.ts                   Auth.js: Google + GitHub, JWT sessions, Drizzle adapter
+auth.ts                   Auth.js: Google sign-in, JWT sessions, Drizzle adapter
 app/
   api/generate/route.ts   POST: validate, rate-limit per user/IP, call Gemini, map errors
   api/usage/route.ts      GET: your tier and remaining generations (doesn't count)

@@ -1,12 +1,11 @@
-// Auth.js v5 config. Google + GitHub OAuth, JWT sessions (no DB read per
+// Auth.js v5 config. Google OAuth, JWT sessions (no DB read per
 // request); the Drizzle adapter persists users/accounts in Neon when
 // DATABASE_URL is set. `session.user.id` is our user id (user.id in Postgres).
 //
-// Env: AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, AUTH_GITHUB_ID,
-// AUTH_GITHUB_SECRET (Auth.js reads the AUTH_<PROVIDER>_* names automatically).
+// Env: AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET (Auth.js reads the
+// AUTH_<PROVIDER>_* names automatically).
 
 import NextAuth from "next-auth";
-import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { getDb, hasDb, schema } from "@/lib/server/db";
@@ -26,7 +25,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
         verificationTokensTable: schema.verificationTokens,
       })
     : undefined,
-  providers: [Google, GitHub],
+  providers: [Google],
   session: { strategy: "jwt" },
   trustHost: true,
   callbacks: {
