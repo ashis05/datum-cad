@@ -6,18 +6,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ThreeGeometry } from "replicad-threejs-helper";
 import { initKernel, runAndMesh, exportShape } from "@/lib/replicad/kernelClient";
-import { generateCad, type CadParam, type CadResponse } from "@/lib/api";
+import { generateCad, type CadParam, type CadResponse, type Snapshot } from "@/lib/api";
 import { downloadBlob, slugify } from "@/lib/download";
 import { generateAndBuildWithRetry } from "@/lib/selfCorrect";
 import { describeError } from "@/lib/ui/errors";
 import type { KernelStatus } from "./TopBar";
 
-export interface Snapshot {
-  code: string;
-  params: CadParam[];
-  values: Record<string, number>;
-  designPrompt: string; // first prompt of this design — names the export files
-}
+export type { Snapshot };
 
 export interface HistoryItem {
   id: number;
